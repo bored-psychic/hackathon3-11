@@ -11,18 +11,24 @@ RED_FLAGS = {
         "snakebite", "poison", "suicide", "want to die", "face drooping",
         "slurred speech", "paralysis", "baby not breathing", "severe burn",
         "vomiting blood", "coughing blood",
+        # bleeding signs (dengue warning signs in Karnataka) - NEEDS CLINICAL REVIEW
+        "blood in urine", "bloody urine", "hematuria", "haematuria",
+        "blood in stool", "bloody stool", "black stool", "black stools",
+        "bleeding gums", "gums bleeding", "bleeding from gums",
     ],
     "hi": [
         "सीने में दर्द", "छाती में दर्द", "सांस नहीं", "सांस लेने में तकलीफ",
         "साँस नहीं", "साँस लेने में तकलीफ", "बेहोश", "दौरा", "मिर्गी",
         "बहुत खून", "खून बह", "सांप ने काटा", "साँप ने काटा", "ज़हर", "जहर",
         "आत्महत्या", "मरना चाहता", "लकवा", "खून की उल्टी", "खून की खांसी",
+        "पेशाब में खून", "मल में खून", "मसूड़ों से खून",
     ],
     "kn": [
         "ಎದೆ ನೋವು", "ಉಸಿರಾಟದ ತೊಂದರೆ", "ಉಸಿರಾಡಲು ಆಗುತ್ತಿಲ್ಲ", "ಉಸಿರು ಕಟ್ಟ",
         "ಪ್ರಜ್ಞೆ ತಪ್ಪ", "ಪ್ರಜ್ಞೆಯಿಲ್ಲ", "ಫಿಟ್ಸ್", "ಅಪಸ್ಮಾರ", "ತೀವ್ರ ರಕ್ತಸ್ರಾವ",
         "ಬಹಳ ರಕ್ತ", "ಹಾವು ಕಚ್ಚ", "ವಿಷ ಕುಡಿ", "ವಿಷ ಸೇವ", "ವಿಷಪ್ರಾಶನ", "ವಿಷ ಹಾಕ",
         "ಆತ್ಮಹತ್ಯೆ", "ಪಾರ್ಶ್ವವಾಯು", "ರಕ್ತ ವಾಂತಿ",
+        "ಮೂತ್ರದಲ್ಲಿ ರಕ್ತ", "ಮಲದಲ್ಲಿ ರಕ್ತ", "ಒಸಡಿನಿಂದ ರಕ್ತ",
     ],
     "ta": [
         "நெஞ்சு வலி", "மார்பு வலி", "மூச்சு விட முடியவில்லை", "மூச்சுத் திணறல்",
@@ -45,6 +51,15 @@ RED_FLAGS = {
 ALL_FLAGS = [k for lst in RED_FLAGS.values() for k in lst]
 _ASCII_RE = {k: re.compile(r"\b" + re.escape(k) + r"\b") for k in ALL_FLAGS if k.isascii()}
 
+# Free-word-order English phrases, e.g. "bloody colour urine", "blood coming in my pee".
+_BLEED = r"\bblood(?:y)?\b(?!\s+(?:pressure|test|tests|sugar|report|group|donation|bank))"
+_BODY = r"\b(?:urine|pee|stools?|motions?|potty)\b(?!\s+(?:test|tests|report))"
+_GAP = r"[^\w.,;!?]+"                  # spaces etc., but never across a comma or full stop
+_NEAR = r"(?:" + _GAP + r"\w+){0,3}?" + _GAP  # up to 3 words in between
+PATTERNS = {
+    "blood in urine/stool": re.compile(_BLEED + _NEAR + _BODY + "|" + _BODY + _NEAR + _BLEED),
+}
+
 
 def find_red_flag(text: str):
     """Return the first matching keyword, or None. Checks all languages."""
@@ -55,4 +70,7 @@ def find_red_flag(text: str):
                 return kw
         elif kw in t:
             return kw
+    for name, rx in PATTERNS.items():
+        if rx.search(t):
+            return name
     return None
