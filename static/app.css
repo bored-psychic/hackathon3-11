@@ -131,7 +131,7 @@ h2 { font-size: 21px; margin: 4px 0 14px; line-height: 1.3; }
   font-weight: 700; text-decoration: none; cursor: pointer;
   transition: transform .08s, filter .15s;
 }
-.btn:active { transform: scale(.98); }
+.btn:active { transform: scale(.97); }
 .btn svg { width: 20px; height: 20px; flex-shrink: 0; }
 .btn.primary { background: var(--brand); color: #fff; }
 .btn.danger { background: var(--red-soft); color: var(--red); }
@@ -282,7 +282,7 @@ button:disabled { opacity: .5; cursor: default; }
 .result {
   margin: 14px 0; padding: 18px 16px; border-radius: 22px;
   border: 1px solid; color: var(--muted);
-  animation: rise .25s ease-out both;
+  animation: pop .46s cubic-bezier(.2, .8, .2, 1) both;
 }
 .result.RED { background: #FFF4F2; border-color: #F4C7C1; }
 .result.AMBER { background: #FFF8EA; border-color: #F2D8A6; }
@@ -431,9 +431,7 @@ input.live { border-color: var(--red) !important; background: #fff8f8; box-shado
 .mrow .name { font-weight: 800; overflow-wrap: anywhere; }
 .err-text { color: var(--red); font-weight: 700; }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before { animation: none !important; transition: none !important; }
-}
+
 
 /* ---------- Desktop (>= 1024px): fixed left sidebar ---------- */
 @media (min-width: 1024px) {
@@ -462,4 +460,17 @@ input.live { border-color: var(--red) !important; background: #fff8f8; box-shado
     background: #fff; border: 1px solid var(--line); border-radius: 20px; overflow: hidden;
   }
   #chat { background: #fff; }
+}
+
+/* ---------- Animations ---------- */
+@keyframes pop { 0% { opacity: 0; transform: scale(.92); } 60% { opacity: 1; transform: scale(1.02); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(180, 35, 24, .5); } 100% { box-shadow: 0 0 0 14px rgba(180, 35, 24, 0); } }
+@keyframes slide-in-right { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+.result.RED .call { animation: ring 1.4s ease-out infinite; }
+.row.user { animation: slide-in-right .3s cubic-bezier(.2, .8, .2, 1) both; }
+.chip-btn, #send, .iconbtn, .tile, .member, .helpline, .sos, .linkbtn, .filters button { transition: transform .12s; }
+.chip-btn:active, #send:active, .iconbtn:active, .tile:active, .member:active, .helpline:active, .sos:active, .filters button:active { transform: scale(.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
