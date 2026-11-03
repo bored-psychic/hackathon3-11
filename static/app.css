@@ -474,3 +474,39 @@ input.live { border-color: var(--red) !important; background: #fff8f8; box-shado
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* ---------- Demo login ---------- */
+.acct {
+  min-height: 44px; min-width: 44px; padding: 0 12px; white-space: nowrap;
+  border: 1px solid #C9D6D2; border-radius: 12px; background: #fff; color: var(--ink);
+  font-weight: 600; font-size: 14px; cursor: pointer;
+}
+body.signed-out .tabbar { display: none; }
+.loginbox { max-width: 440px; margin: 24px auto; padding: 20px 16px; }
+.phonerow { display: flex; gap: 8px; }
+.phonerow .prefix {
+  display: inline-flex; align-items: center; min-height: 48px; padding: 0 12px;
+  border: 1.5px solid #C9D6D2; border-radius: 12px; background: var(--bg); font-weight: 600;
+}
+.phonerow input, .codein {
+  min-width: 0; min-height: 48px; padding: 10px 12px; font-size: 18px; background: #fff;
+  border: 1.5px solid #C9D6D2; border-radius: 12px;
+}
+.phonerow input { flex: 1; letter-spacing: 1px; }
+.codein { width: 100%; font-size: 28px; letter-spacing: 10px; text-align: center; }
+.demochip {
+  display: inline-block; margin: 14px 0 0; padding: 4px 14px; border-radius: 999px;
+  background: var(--brand-soft); color: var(--brand-dark); font-weight: 600; font-size: 14px;
+}
+@media (max-width: 440px) {
+  /* room for the account chip: keep the name for screen readers, show the logo only */
+  body:not(.signed-out) .topbar h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  body:not(.signed-out) #lang { margin-left: auto; max-width: 96px; }
+}
+@media (min-width: 1024px) {
+  /* signed out: no sidebar, so the brand goes back into the topbar */
+  body.signed-out #main { margin-left: 0; }
+  body.signed-out .topbar-in { margin: 0 auto; }
+  body.signed-out .topbar .logo { position: static; }
+  body.signed-out .topbar h1 { position: static; width: auto; height: auto; flex: 1; display: block; }
+}

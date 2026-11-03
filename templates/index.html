@@ -28,11 +28,15 @@
       <option value="te" lang="te">తెలుగు</option>
       <option value="ml" lang="ml">മലയാളം</option>
     </select>
+    <button type="button" id="acct" class="acct" hidden></button>
     <a class="sos" href="tel:108" data-i18n-aria="call108" aria-label="Call 108">108</a>
   </div>
 </header>
 
 <main id="main">
+  <!-- Demo sign-in: filled by renderLogin() -->
+  <section id="view-login" class="view" hidden></section>
+
   <!-- Dashboard: filled by renderHome() -->
   <section id="view-home" class="view" hidden></section>
 

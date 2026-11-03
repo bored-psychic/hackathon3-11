@@ -9,7 +9,9 @@
   var DEFAULT_LANG = 'kn';            // Karnataka default (see API.md)
   var CHAT_TIMEOUT_MS = 40000;        // backend LLM call can take ~25s
   var PLACES_TIMEOUT_MS = 75000;      // OpenStreetMap lookups can be slow
-  var STORE_KEY = 'triage-app-v1';
+  var STORE_KEY = 'triage-app-v1';    // per number: STORE_KEY + ':' + phone
+  var SESSION_KEY = 'triage-session-v1'; // demo sign-in: { phone }
+  var DEMO_CODE = '123456';
   var DAY = 86400000;
   var APPROX_M = 3000;                // a location fix worse than this is "approximate" (Wi-Fi / IP based)
 
@@ -68,9 +70,12 @@
   function blankStore() {
     return { lang: null, members: [], contact: { name: '', phone: '' }, checks: [], places: null, lastLoc: null };
   }
+  var phone = null;   // signed-in mobile number (10 digits). It stays on this phone: never sent anywhere.
+  var sessionId = 0;  // bumped on every sign-in/out so a late reply cannot write into another number's store
+  function storeKey() { return STORE_KEY + ':' + phone; }
   function loadStore() {
     var s = null;
-    try { s = JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) {}
+    if (phone) { try { s = JSON.parse(localStorage.getItem(storeKey())); } catch (e) {} }
     if (s && typeof s === 'object' && Array.isArray(s.members)) {
       var b = blankStore();
       for (var k in b) if (s[k] === undefined) s[k] = b[k];
@@ -81,7 +86,7 @@
     return s;
   }
   var store = loadStore();
-  function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) {} }
+  function save() { if (!phone) return; try { localStorage.setItem(storeKey(), JSON.stringify(store)); } catch (e) {} }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
   function member(id) { return store.members.find(function (m) { return m.id === id; }) || null; }
 
@@ -150,6 +155,8 @@
       e.setAttribute('aria-label', t(e.getAttribute('data-i18n-aria')));
     });
     store.lang = code;
+    try { localStorage.setItem('triage-lang', code); } catch (e) {} // language only, so the login screen and new numbers follow it
+    updateAcct();
     save();
   }
 
@@ -187,6 +194,100 @@
     }
   }
 
+  /* ---------- Demo sign-in (no SMS, no server; each number keeps its own data on this phone) ---------- */
+  var login = { step: 'phone', num: '', err: '' };
+  function readSession() {
+    try { var x = JSON.parse(localStorage.getItem(SESSION_KEY)); return x && /^\d{10}$/.test(x.phone) ? x.phone : null; } catch (e) { return null; }
+  }
+  function updateAcct() {
+    var b = $('acct');
+    b.hidden = !phone;
+    if (!phone) return;
+    b.textContent = '•••• ' + phone.slice(-4);
+    b.setAttribute('aria-label', t('switchNumber') + ': •••• ' + phone.slice(-4));
+  }
+  // Forget everything in memory that belongs to the previous number (chat, nearby search, forms).
+  function resetSessionState() {
+    if (activeRec) activeRec.stop();
+    stopSpeaking();
+    history = []; started = false; busy = false; typingRow = null;
+    chat.textContent = ''; note.textContent = ''; whoSel.textContent = '';
+    sendBtn.disabled = false; micBtn.disabled = false; whoSel.disabled = false;
+    near = { status: 'idle', choices: [], filter: 'all', query: '', where: null, spec: '' };
+    fam = { editing: undefined, confirm: null, flash: '' };
+  }
+  function signIn(p) {
+    try {
+      var key = STORE_KEY + ':' + p;
+      if (localStorage.getItem(key) == null) { // the pre-login single store moves to the FIRST number only, then is deleted
+        var old = localStorage.getItem(STORE_KEY);
+        if (old != null) { localStorage.setItem(key, old); localStorage.removeItem(STORE_KEY); }
+      }
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ phone: p }));
+    } catch (e) {} // storage blocked: still works for this visit, in memory
+    sessionId++;
+    resetSessionState();
+    phone = p;
+    store = loadStore();
+    login = { step: 'phone', num: '', err: '' };
+    if (T[store.lang]) langSel.value = store.lang;
+    applyLanguage();
+    go('home');
+  }
+  function signOut() {
+    try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+    sessionId++;
+    resetSessionState();
+    phone = null;
+    store = loadStore(); // blank, language only
+    route();
+  }
+
+  function renderLogin() {
+    var v = $('view-login');
+    v.textContent = '';
+    function digitsOnly(el) { el.value = el.value.replace(/\D/g, ''); }
+    var demo = h('p', { class: 'demochip', text: t('demoCode') });
+    var err = h('p', { class: 'err-text', role: 'alert', text: login.err });
+    var first;
+    if (login.step === 'phone') {
+      var ph = first = h('input', { type: 'tel', id: 'lph', inputmode: 'numeric', autocomplete: 'tel-national', maxlength: 10 });
+      ph.value = login.num;
+      ph.addEventListener('input', function () { digitsOnly(ph); login.num = ph.value; });
+      v.appendChild(h('form', { class: 'card loginbox', onsubmit: function (e) {
+        e.preventDefault();
+        if (!/^\d{10}$/.test(ph.value)) { login.err = t('badPhone'); err.textContent = login.err; ph.focus(); return; }
+        login.num = ph.value; login.step = 'code'; login.err = ''; renderLogin();
+      } }, [
+        h('h2', { text: t('loginTitle') }),
+        h('p', { class: 'muted', text: t('loginSub') }),
+        h('div', { class: 'field' }, [h('label', { for: 'lph', text: t('mobile') }),
+          h('div', { class: 'phonerow' }, [h('span', { class: 'prefix', text: '+91' }), ph])]),
+        err,
+        h('button', { class: 'btn primary big', type: 'submit', text: t('sendCode') }),
+        demo
+      ]));
+    } else {
+      var code = first = h('input', { type: 'text', id: 'lcode', class: 'codein', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6 });
+      code.addEventListener('input', function () { digitsOnly(code); });
+      v.appendChild(h('form', { class: 'card loginbox', onsubmit: function (e) {
+        e.preventDefault();
+        if (code.value !== DEMO_CODE) { err.textContent = t('badCode'); code.focus(); return; }
+        signIn(login.num);
+      } }, [
+        h('button', { class: 'linkbtn', type: 'button', text: '← ' + t('changeNumber'),
+          onclick: function () { login.step = 'phone'; login.err = ''; renderLogin(); } }),
+        h('h2', { text: t('codeTitle') }),
+        h('p', { class: 'muted', text: t('codeSent', { num: login.num.slice(0, 5) + ' ' + login.num.slice(5) }) }),
+        h('div', { class: 'field' }, [h('label', { for: 'lcode', text: t('codeLbl') }), code]),
+        err,
+        h('button', { class: 'btn primary big', type: 'submit', text: t('verify') }),
+        demo
+      ]));
+    }
+    setTimeout(function () { if (first.isConnected && !first.disabled) first.focus(); }, 0);
+  }
+
   /* ---------- Router: #home | #check | #near | #family ---------- */
   var VIEWS = { home: renderHome, check: renderCheck, near: renderNear, family: renderFamily };
   function currentTab() {
@@ -195,6 +296,14 @@
   }
   function route() {
     var tab = currentTab();
+    document.body.classList.toggle('signed-out', !phone);
+    updateAcct();
+    $('view-login').hidden = !!phone;
+    if (!phone) { // signed out: only the login view (the topbar with language + 108 is always there)
+      Object.keys(VIEWS).forEach(function (k) { $('view-' + k).hidden = true; });
+      renderLogin();
+      return;
+    }
     Object.keys(VIEWS).forEach(function (k) { $('view-' + k).hidden = k !== tab; });
     document.querySelectorAll('.tabbar a').forEach(function (a) {
       if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
@@ -464,7 +573,7 @@
   async function send(text) {
     text = (text || '').trim();
     if (!text || busy) return;
-    var m = member(whoSel.value);
+    var m = member(whoSel.value), sid = sessionId;
     input.value = '';
     note.textContent = '';
     var det = detectScript(text);
@@ -486,6 +595,7 @@
     } catch (e) {
       data = null; // offline, timeout, or non-JSON server error
     }
+    if (sid !== sessionId) return; // signed out / switched number meanwhile: drop the reply
     setBusy(false);
 
     if (!data || !data.type) {
@@ -584,7 +694,7 @@
       return h('div', { class: 'alertbox' }, [h('button', { class: 'btn', type: 'button',
         onclick: function () { location.hash = '#family'; } }, [icon('plus'), t('addContact', null, code)])]);
     }
-    var box = h('div', { class: 'alertbox' });
+    var box = h('div', { class: 'alertbox' }), sid = sessionId;
     function fill() {
       var msg = encodeURIComponent(alertText(rec, m, code));
       box.textContent = '';
@@ -600,6 +710,7 @@
       navigator.permissions.query({ name: 'geolocation' }).then(function (p) {
         if (p.state !== 'granted') return;
         navigator.geolocation.getCurrentPosition(function (pos) {
+          if (sid !== sessionId) return;
           store.lastLoc = { lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy, at: Date.now() };
           save();
           fill();
@@ -680,14 +791,17 @@
 
   function locate() {
     if (!navigator.geolocation) { setNear('error', { msg: 'locErr' }); return; }
+    var sid = sessionId;
     setNear('locating', { choices: [] });
     // High accuracy asks the phone for GPS instead of a rough network guess.
     navigator.geolocation.getCurrentPosition(function (pos) {
+      if (sid !== sessionId) return;
       var c = pos.coords;
       store.lastLoc = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, at: Date.now() };
       save();
       loadPlaces(c.latitude, c.longitude, '', c.accuracy);
     }, function () {
+      if (sid !== sessionId) return;
       setNear('error', { msg: 'locErr' });
     }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
   }
@@ -696,26 +810,29 @@
     q = (q || '').trim();
     near.query = q;
     if (!q) return;
+    var sid = sessionId;
     setNear('loading', { choices: [] });
     try {
       var r = await fetchJSON('/geocode?q=' + encodeURIComponent(q) + '&lang=' + lang(), null, 20000);
+      if (sid !== sessionId) return;
       var res = (r.data && r.data.results) || [];
       if (!res.length) setNear('error', { msg: 'locErr' });
       else if (res.length === 1) loadPlaces(res[0].lat, res[0].lon, res[0].name, null);
       else setNear('choose', { choices: res });
     } catch (e) {
-      setNear('error', { msg: 'nearErr' });
+      if (sid === sessionId) setNear('error', { msg: 'nearErr' });
     }
   }
 
   async function loadPlaces(lat, lon, label, acc) {
+    var sid = sessionId;
     near.where = { lat: lat, lon: lon, acc: acc, name: label || '' };
     setNear('loading', { choices: [] });
     // For GPS, look up the place name in parallel so the person can see whether the location is right.
     if (!label) {
       fetchJSON('/reverse?lat=' + lat.toFixed(5) + '&lon=' + lon.toFixed(5) + '&lang=' + lang(), null, 15000).then(function (r) {
         var name = r.data && r.data.name;
-        if (!name) return;
+        if (!name || sid !== sessionId) return;
         if (near.where && near.where.lat === lat) near.where.name = name;
         if (store.places && store.places.lat === lat) { store.places.label = name; save(); }
         if (currentTab() === 'near') renderNear();
@@ -723,12 +840,14 @@
     }
     try {
       var r = await fetchJSON('/places?lat=' + lat.toFixed(5) + '&lon=' + lon.toFixed(5), null, PLACES_TIMEOUT_MS);
+      if (sid !== sessionId) return;
       if (!r.ok || !r.data || !Array.isArray(r.data.places)) throw new Error('bad response');
       store.places = { at: Date.now(), lat: lat, lon: lon, acc: acc, label: (near.where && near.where.name) || label || '',
         list: r.data.places, radius_km: r.data.radius_km };
       save();
       setNear('done');
     } catch (e) {
+      if (sid !== sessionId) return;
       setNear('error', { msg: 'nearErr' }); // a previously saved list (if any) is still shown below
     }
   }
@@ -976,6 +1095,11 @@
      START
      ===================================================================== */
   document.querySelectorAll('[data-icon]').forEach(function (s) { s.appendChild(icon(s.getAttribute('data-icon'))); });
+  phone = readSession();
+  store = loadStore();
+  $('acct').addEventListener('click', function () {
+    if (phone && confirm(t('switchConfirm', { num: '•••• ' + phone.slice(-4) }))) signOut();
+  });
   langSel.value = initialLang();
   langSel.addEventListener('change', function () {
     stopSpeaking();
