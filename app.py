@@ -217,6 +217,8 @@ def normalize_llm(out, lang):
     if kind not in ("question", "final"):
         kind = "final" if level in LEVELS else "question" if reply else "error"
 
+    if kind == "question" and level == "RED":
+        return red_response(lang)  # the model says emergency: do not make the user answer a question first
     if kind == "final":
         return {"type": "final", "level": level if level in LEVELS else "AMBER", "reply": reply,
                 "reason": as_text(out.get("reason")), "advice": as_text(out.get("advice")),
@@ -238,9 +240,13 @@ def raw_symptom_text(out):
     return as_text(symptoms)
 
 
-def red_response(lang, kw):
-    return {"type": "final", "level": "RED", "reply": RED_MSG[lang],
-            "reason": RED_MSG[lang], "advice": RED_MSG[lang], "matched": kw}
+def red_response(lang, kw=None):
+    # advice stays empty so the card, which shows reason and advice, shows the message once
+    body = {"type": "final", "level": "RED", "reply": RED_MSG[lang],
+            "reason": RED_MSG[lang], "advice": "", "symptoms_en": []}
+    if kw:
+        body["matched"] = kw  # API.md: only RED from the hard-coded check has this
+    return body
 
 
 def fallback_response(lang, symptoms):
@@ -298,5 +304,9 @@ def chat():
     return jsonify(result)
 
 
+def debug_enabled():
+    return (os.getenv("FLASK_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    app.run(debug=debug_enabled(), port=5001)

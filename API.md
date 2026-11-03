@@ -32,3 +32,8 @@ The bot assumes the user is in Karnataka: advice points to 108 / 112, PHC, CHC, 
 Languages (picker order): English, ಕನ್ನಡ (kn, default for Karnataka), हिन्दी, தமிழ், తెలుగు, മലയാളം.
 Frontend must translate its static UI text for all 6 languages and render all scripts correctly.
 It's a mobile web app: design for 360px width first; optionally add a web app manifest + theme-color so it can be "Add to Home Screen".
+
+## Frontend notes
+- HTTP 400 {"error":"too_long"} for messages over 1000 characters
+- do not add type error replies to history
+- clear history after a final result

@@ -1,11 +1,13 @@
-# Rural Symptom Triage Bot
-Flask app: symptoms in EN/KN/HI -> Red/Amber/Green + next step. Red-flag check runs before the LLM.
+# Rural Symptom Triage Bot (English, Kannada, Hindi, Tamil, Telugu, Malayalam)
+Flask app: symptoms in EN/KN/HI/TA/TE/ML -> Red/Amber/Green + next step. Red-flag check runs before the LLM.
 
 ## Run
     python3 -m venv venv && source venv/bin/activate
     pip install -r requirements.txt
     cp .env.example .env   # add LLM_API_KEY
     python app.py          # http://localhost:5001
+
+Debug mode is off. Set `FLASK_DEBUG=1` to turn it on for local work only.
 
 ## LLM provider (free, no card or billing)
 Set `LLM_PROVIDER` to `groq` (default), `openrouter` or `gemini`, and `LLM_API_KEY` to that provider's key.
