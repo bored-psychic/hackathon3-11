@@ -462,7 +462,7 @@ input.live { border-color: var(--red) !important; background: #fff8f8; box-shado
     max-width: 760px; padding: 0; margin: 24px auto; height: calc(100% - 48px);
     background: #fff; border: 1px solid var(--line); border-radius: 20px; overflow: hidden;
   }
-  #chat { background: #fff; }
+  #chat { background: transparent; }
 }
 
 /* ---------- Animations ---------- */
@@ -528,7 +528,8 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 3px solid
 
 /* 3D host + static fallback (a blurred teal shape, shown whenever the canvas is not running) */
 .fx-host { position: relative; }
-.fx-host canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.fx-host canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0; transition: opacity .7s ease; }
+.fx-host.fx-on canvas { opacity: 1; }
 .fx-fallback { position: absolute; inset: 14%; border-radius: 50%; background: var(--brand); opacity: .3; filter: blur(34px); }
 .fx-host.fx-on .fx-fallback { display: none; }
 .chat-orb { display: none; }
@@ -554,11 +555,15 @@ a:focus-visible, button:focus-visible, select:focus-visible { outline: 3px solid
   .sec { margin: 32px 0 12px; }
   .hero { padding: 44px 48px 40px; min-height: 300px; margin-bottom: 24px; border-radius: 28px; }
   .hero h2 { font-size: clamp(56px, 5.4vw, 72px); margin: 10px 0 8px; }
-  .hero-sub { font-size: 18px; max-width: 420px; }
+  .hero h2 { max-width: 54%; overflow-wrap: anywhere; }
+  .hero-sub { font-size: 18px; max-width: 46%; }
   .hero-btn { width: auto; min-width: 280px; }
   .hero .hero-fx { right: -20px; top: -20px; width: min(48%, 420px); height: calc(100% + 40px); }
-  .who { position: relative; }
-  .chat-orb { display: block; width: 44px; height: 44px; margin-left: auto; pointer-events: none; }
+  /* the ambient form sits behind the chat; it comes forward during a level echo */
+  .chatview { position: relative; }
+  .chatview > *:not(.fx-host) { position: relative; z-index: 1; }
+  .chat-orb { display: block; position: absolute; right: -80px; top: 64px; width: 300px; height: 300px; z-index: 0; opacity: .3; transition: opacity .6s ease; pointer-events: none; }
+  .chat-orb.fx-echo { opacity: .95; }
   .login-split { grid-template-columns: 1.15fr 1fr; height: 100%; min-height: 0; }
   #view-login { overflow: hidden; height: 100%; }
   .login-art {

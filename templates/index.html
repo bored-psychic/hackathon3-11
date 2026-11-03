@@ -12,13 +12,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=7">
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=8">
 <!-- Vendored, pinned animation libraries (see static/vendor/README.md). No CDN. -->
 <script defer src="{{ url_for('static', filename='vendor/gsap.min.js') }}"></script>
 <script defer src="{{ url_for('static', filename='vendor/ScrollTrigger.min.js') }}"></script>
 <script defer src="{{ url_for('static', filename='vendor/Flip.min.js') }}"></script>
 <script defer src="{{ url_for('static', filename='vendor/SplitText.min.js') }}"></script>
-<script defer src="{{ url_for('static', filename='motion.js') }}?v=7"></script>
+<script defer src="{{ url_for('static', filename='motion.js') }}?v=8"></script>
 </head>
 <body>
 
@@ -48,10 +48,10 @@
 
   <!-- Symptom check chatbot -->
   <section id="view-check" class="view chatview" hidden>
+    <div class="fx-host chat-orb" aria-hidden="true"><div class="fx-fallback"></div></div>
     <div class="who">
       <label for="who" data-i18n="checkingFor">Checking for</label>
       <select id="who"></select>
-      <div class="fx-host chat-orb" aria-hidden="true"><div class="fx-fallback"></div></div>
     </div>
     <p id="shareNote" class="sharenote" data-i18n="shareNote" hidden></p>
     <div id="chat" aria-live="polite"></div>
@@ -78,7 +78,7 @@
   <a href="#family" data-tab="family"><span class="ico" data-icon="people"></span><span data-i18n="navFamily">Family</span></a>
 </nav>
 
-<script defer src="{{ url_for('static', filename='i18n.js') }}?v=7"></script>
-<script defer src="{{ url_for('static', filename='app.js') }}?v=7"></script>
+<script defer src="{{ url_for('static', filename='i18n.js') }}?v=8"></script>
+<script defer src="{{ url_for('static', filename='app.js') }}?v=8"></script>
 </body>
 </html>

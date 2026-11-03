@@ -300,6 +300,41 @@
     document.addEventListener('pointerleave', function () { if (cur) { release(cur); cur = null; } }, true);
   })();
 
+  /* ---------- 3D layer: only fetched when every gate passes; otherwise the CSS fallback shape stays ---------- */
+  var BASE = ((document.currentScript && document.currentScript.src) || '/static/motion.js').replace(/motion\.js.*$/, '');
+  var fxState = 'idle', fxWanted = null, webgl = null; // idle | loading | ready | no
+  function webglOk() {
+    if (webgl !== null) return webgl;
+    webgl = false;
+    try {
+      var gl = document.createElement('canvas').getContext('webgl2', { failIfMajorPerformanceCaveat: true });
+      if (gl) { webgl = true; var lose = gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext(); }
+    } catch (e) { webgl = false; }
+    return webgl;
+  }
+  function fxAllowed() {
+    if (S.tier !== 'full' || window.innerWidth < 1024) return false;
+    if (/[?&]fx=off\b/.test(location.search)) return false;
+    if (navigator.deviceMemory && navigator.deviceMemory < 4) return false;
+    return webglOk();
+  }
+  function fxSync(name) {
+    fxWanted = name;
+    if (fxState === 'ready') { try { window.FX3D.sync(name); } catch (e) {} return; }
+    if (fxState !== 'idle' || !fxAllowed()) return;
+    fxState = 'loading';
+    var load = function () {
+      import(BASE + 'fx3d.js?v=8').then(function (mod) {
+        window.FX3D = mod.default;
+        fxState = 'ready';
+        window.FX3D.sync(fxWanted);
+      }).catch(function () { fxState = 'no'; });
+    };
+    // Let the first choreography play before parsing Three.js.
+    if (window.requestIdleCallback) window.requestIdleCallback(load, { timeout: 900 }); else setTimeout(load, 500);
+  }
+  window.addEventListener('resize', function () { clearTimeout(fxSync._t); fxSync._t = setTimeout(function () { if (fxWanted) fxSync(fxWanted); }, 200); });
+
   /* ---------- public API ---------- */
   window.Motion = {
     tier: S.tier,
@@ -314,7 +349,7 @@
     login: loginIn, shake: shake, errIn: errIn,
     bubble: bubble, chips: chips, typing: typing, clear: clearLoops,
     result: result, echo: echo, tabs: tabs, list: list, expand: expand, collapse: collapse, crossfade: crossfade,
-    fx: function (name) { if (window.FX3D && window.FX3D.sync) { try { window.FX3D.sync(name); } catch (e) {} } },
+    fx: fxSync,
     _S: S
   };
 })();
