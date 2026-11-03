@@ -1,0 +1,11 @@
+# expected | language | sentence
+RED   | en | My father has chest pain and is sweating a lot
+RED   | en | A snake bite my son on the leg
+RED   | hi | मेरी माँ को सीने में दर्द हो रहा है
+RED   | hi | बच्चा बेहोश हो गया है
+RED   | kn | ನನ್ನ ಅಪ್ಪನಿಗೆ ಎದೆ ನೋವು ಇದೆ
+RED   | kn | ಮಗುವಿಗೆ ಉಸಿರಾಡಲು ಆಗುತ್ತಿಲ್ಲ
+AMBER | en | I have had fever for 3 days with body ache
+AMBER | hi | बच्चे को दो दिन से दस्त हो रहे हैं
+GREEN | en | I have a mild runny nose since morning
+GREEN | kn | ನನಗೆ ಸ್ವಲ್ಪ ತಲೆನೋವು ಇದೆ
