@@ -110,7 +110,7 @@ class RedFlagPathTests(OfflineTestCase):
         with open(os.path.join(REPO_ROOT, "tests", "demo_sentences.txt"), encoding="utf-8") as f:
             rows = [line.split("|", 2) for line in f if line.strip() and not line.startswith("#")]
         red_rows = [(lang.strip(), text.strip()) for level, lang, text in rows if level.strip() == "RED"]
-        self.assertEqual(len(red_rows), 9)
+        self.assertEqual(len(red_rows), 11)
         for lang, text in red_rows:
             with self.subTest(sentence=text), mock.patch("app.call_llm") as llm:
                 self.assert_hard_coded_red(self.post(text, lang), lang)

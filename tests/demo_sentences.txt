@@ -15,3 +15,6 @@ RED   | ml | അച്ഛന് നെഞ്ചുവേദന ഉണ്ട്
 AMBER | ta | மூன்று நாட்களாக காய்ச்சல் இருக்கிறது
 GREEN | te | కొంచెం తలనొప్పి ఉంది
 GREEN | ml | ചെറിയ ജലദോഷം ഉണ്ട്
+RED   | en | A snake bit my son on the leg
+GREEN | en | No chest pain, just a mild cough since yesterday
+RED   | kn | ಹಾವು ಕಡಿದಿದೆ
