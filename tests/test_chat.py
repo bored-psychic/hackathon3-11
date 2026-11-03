@@ -37,8 +37,8 @@ RED_SENTENCE = {
     "ml": "അച്ഛന് നെഞ്ചുവേദന ഉണ്ട്",
 }
 FAKE_KEY = "fake-key-for-tests"
-QUESTION_KEYS = {"type", "reply", "level", "symptoms_en"}
-FINAL_KEYS = {"type", "level", "reply", "reason", "advice", "symptoms_en"}
+QUESTION_KEYS = {"type", "reply", "level", "symptoms_en", "language"}
+FINAL_KEYS = {"type", "level", "reply", "reason", "advice", "symptoms_en", "specialty", "facility", "language"}
 ERROR_KEYS = {"type", "reply"}
 
 
@@ -215,7 +215,8 @@ class NormalizeTests(OfflineTestCase):
         for out in ({"type": "ask", "reply": "How long?"}, {"reply": "How long?"}, {"type": ["x"], "reply": "How long?"}):
             with self.subTest(out=out):
                 self.assertEqual(chat_app.normalize_llm(out, "en"),
-                                 {"type": "question", "reply": "How long?", "level": None, "symptoms_en": []})
+                                 {"type": "question", "reply": "How long?", "level": None, "symptoms_en": [],
+                                  "language": "en"})
 
     def test_unknown_type_with_nothing_usable_is_localised_error(self):
         for lang in LANGS:

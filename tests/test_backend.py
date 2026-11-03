@@ -63,7 +63,8 @@ class ChatTests(OfflineTestCase):
         fake = {"type": "question", "reply": "How many days?", "level": None, "symptoms_en": ["fever"]}
         with mock.patch.object(backend, "call_llm", return_value=fake):
             o = post(self.c, "I have fever").get_json()
-        self.assertEqual(o, {"type": "question", "reply": "How many days?", "level": None, "symptoms_en": ["fever"]})
+        self.assertEqual(o, {"type": "question", "reply": "How many days?", "level": None, "symptoms_en": ["fever"],
+                             "language": "en"})
 
     def test_final_bad_level_becomes_amber(self):
         fake = {"type": "final", "reply": "See PHC", "level": "yellow", "reason": "r", "advice": "a"}
@@ -626,7 +627,7 @@ class PlacesBehaviourTests(OsmTestCase):
         self.assertEqual(set(body), {"places", "radius_km", "source"})
         self.assertEqual((body["radius_km"], body["source"]), (13, "OpenStreetMap"))
         self.assertEqual(set(body["places"][0]), {"name", "local_name", "kind", "sub", "lat", "lon", "distance_km",
-                                                  "phone", "address", "emergency", "opening_hours"})
+                                                  "phone", "address", "emergency", "opening_hours", "specialties"})
         self.assertEqual(body["places"][0]["kind"], "govt")
 
     def test_missing_or_out_of_range_location_is_400(self):

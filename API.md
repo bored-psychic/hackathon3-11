@@ -63,3 +63,27 @@ It's a mobile web app: design for 360px width first; optionally add a web app ma
 - /chat answers within 35 s, also when a provider is down, so a client timeout should be longer than that
 - do not add type error replies to history
 - clear history after a final result
+
+## Web app v3 additions (additive: every earlier field is unchanged)
+
+### POST /chat: extra fields
+- question: `"language": "kn"`
+- final (LLM, hard-coded RED and the follow-up fallback):
+      "specialty": "general"|"emergency"|"heart"|"child"|"maternity"|"bone"|"eye"|"ent"|"dental"|"skin"|"mental"|"kidney"|"chest"|"neuro"|"cancer",
+      "facility": "phc"|"chc"|"district_hospital"|"specialty_hospital",
+      "language": "kn"
+- `specialty` / `facility`: the kind of doctor and building to recommend. RED is never sent to a PHC or CHC.
+  Hard-coded RED: specialty "emergency", facility "district_hospital". Fallback AMBER: "general", "phc".
+- `language`: the language of the reply, so the UI can switch to it.
+  - The AI replies in the language the user actually wrote in (Indic script detected; Hindi/Kannada/Tamil typed in English letters is left to the model).
+  - Fixed messages (the 108 warning, errors, fallback) use the script the user typed in; for English letters they stay in the app's selected language, because English letters may be romanised Kannada.
+
+### GET /places: extra field per place
+`"specialties": ["eye", "child", ...]` (same keys as `specialty`), from OSM `healthcare:speciality` / `emergency` / `amenity=dentist` and words in the name. Dentists are now included.
+
+### GET /reverse?lat=12.52&lon=76.89&lang=kn
+Coordinates -> short place name, so the user can confirm the GPS fix (Nominatim reverse, same 1 request/second spacing and User-Agent as /geocode).
+
+    {"name": "Pandavapura, Mandya"}
+
+Bad coordinates -> 400 {"error": "bad location"}; lookup failed -> 502 {"error": "unavailable"}.

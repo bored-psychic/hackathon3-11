@@ -54,7 +54,8 @@ class RedResponseTests(OfflineTestCase):
                 llm.assert_not_called()
                 self.assertEqual(body, {"type": "final", "level": "RED", "reply": chat_app.RED_MSG[lang],
                                         "reason": chat_app.RED_MSG[lang], "advice": "", "symptoms_en": [],
-                                        "matched": "chest pain"})
+                                        "specialty": "emergency", "facility": "district_hospital",
+                                        "language": lang, "matched": "chest pain"})
 
     def test_llm_override_uses_the_same_response(self):
         llm_result = {"type": "final", "level": "GREEN", "symptoms_en": ["chest pain", "cough"]}
@@ -134,7 +135,7 @@ class PromptRuleTests(OfflineTestCase):
     def test_the_prompt_still_formats_for_every_language(self):
         for lang, name in chat_app.LANG_NAMES.items():
             with self.subTest(lang=lang):
-                self.assertIn(f"Reply ONLY in {name}", chat_app.SYSTEM_PROMPT.format(lang=name))
+                self.assertIn(f"Reply ONLY in {name}", chat_app.build_system_prompt(lang, False, ""))
 
 
 class DebugSettingTests(OfflineTestCase):

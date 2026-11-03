@@ -21,3 +21,11 @@ When a provider fails, `/chat` still answers within 35 seconds, in the user's la
 - If all of that fails, or 35 seconds run out, the user gets the error reply. The log names the provider that answered and nothing else about it.
 
 Messages over 1000 characters return HTTP 400 `{"error":"too_long"}`, and malformed requests return HTTP 400 `{"error":"bad_request"}`, unless the message contains a red flag, which still returns RED.
+
+## Open it on a phone (same Wi-Fi)
+    python app.py --wifi        # or: SHARE_ON_WIFI=1 python app.py
+It prints the address to type on the phone, e.g. `http://192.168.1.5:5001`. The phone must be on the same Wi-Fi.
+- macOS may ask "Allow incoming connections" for Python: click Allow.
+- In this mode the debugger is always off, because anyone on the same Wi-Fi can reach the app.
+- Phone browsers only allow the microphone on https or localhost, so voice input will not work over this address.
+  For voice on a phone, use an https tunnel (e.g. ngrok) instead.
