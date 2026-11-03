@@ -13,6 +13,11 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=5">
+<!-- Vendored, pinned animation libraries (see static/vendor/README.md). No CDN. -->
+<script defer src="{{ url_for('static', filename='vendor/gsap.min.js') }}"></script>
+<script defer src="{{ url_for('static', filename='vendor/ScrollTrigger.min.js') }}"></script>
+<script defer src="{{ url_for('static', filename='vendor/Flip.min.js') }}"></script>
+<script defer src="{{ url_for('static', filename='vendor/SplitText.min.js') }}"></script>
 </head>
 <body>
 
