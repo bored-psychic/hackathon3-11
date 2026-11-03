@@ -127,10 +127,14 @@ def normalize_llm(out, lang):
 
 def raw_symptom_text(out):
     """All symptom text in the raw LLM result, however malformed. The safety override reads
-    this, not the normalised copy, so a broken reply can never hide a red-flag symptom."""
+    this, not the normalised copy, so a broken reply can never hide a red-flag symptom.
+    Items join with a sentence break so a negation cannot cross from one item to the next."""
     if not isinstance(out, dict):
         return ""
-    return as_text(out.get("symptoms_en"))
+    symptoms = out.get("symptoms_en")
+    if isinstance(symptoms, list):
+        return " . ".join(s for s in symptoms if isinstance(s, str))
+    return as_text(symptoms)
 
 
 def red_response(lang, kw):

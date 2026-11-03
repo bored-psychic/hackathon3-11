@@ -4,6 +4,8 @@ become spaces, repeated whitespace collapses. ASCII keywords match whole words o
 keywords match as substrings, so a stem like "ಹಾವು ಕಚ್ಚ" also matches its inflected forms.
 Avoid bare words with an innocent second meaning: "fits" (shoe fits), "poison" (poison ivy),
 "दौरा" (a doctor's visit).
+A message is RED if ANY occurrence of ANY keyword is not denied. See _is_denied: the rule is narrow on
+purpose, because a loose one hides real emergencies. When unsure, RED.
 NOTE: have native speakers review every non-English list."""
 import re
 import unicodedata
@@ -124,10 +126,43 @@ ALL_FLAGS = list(dict.fromkeys(normalise(k) for lst in RED_FLAGS.values() for k 
 _PATTERNS = [(k, re.compile(r"\b" + re.escape(k) + r"\b" if k.isascii() else re.escape(k))) for k in ALL_FLAGS]
 
 
-def find_red_flag(text: str):
-    """Return the first matching keyword, or None. Checks all languages."""
-    t = normalise(text)
+# Denial forms for ASCII (English and romanised) keywords. The negation must sit directly before the keyword.
+_NEGATION_BEFORE = re.compile(
+    r"(?:\bno|\bnot|\bnever|\bwithout|\bdon't have|\bdo not have|\bdoesn't have|\bdoes not have"
+    r"|\bdidn't have|\bdid not have)\s+(?:any\s+|a\s+)?$"
+)
+_LOOKBEHIND_CHARS = 32  # longer than the longest form, "does not have any "
+
+# Denial words for hi/kn/ta/te/ml keywords. A whole token only: "ಗೊತ್ತಿಲ್ಲ" ends in "ಇಲ್ಲ" but is not one.
+_NEGATION_AFTER = frozenset(normalise(w) for w in ("नहीं", "नही", "ಇಲ್ಲ", "இல்லை", "లేదు", "ഇല്ല"))
+_NOT_IN_TOKEN = r"\s.,;:!?।॥|()\[\]{}\"…"
+# Skips the rest of the current word, since a keyword can be a stem, then captures up to 2 tokens.
+# Punctuation ends the match, so a denial word after punctuation is never reached.
+_NEXT_TWO_TOKENS = re.compile(rf"[^{_NOT_IN_TOKEN}]*(?:\s+([^{_NOT_IN_TOKEN}]+))?(?:\s+([^{_NOT_IN_TOKEN}]+))?")
+
+# Normalising turns these into plain spaces, which erases a break between two statements.
+_ERASED_BREAK = re.compile(r"\s+[-_]+\s*|[-_]+\s+|\s*[\u2010-\u2014\u2212]+\s*|[\r\n]+")
+
+
+def _is_denied(text, match):
+    """True only for the exact denial forms. Looks only outside the keyword's own span, so a keyword that
+    contains a negation ("not breathing", "सांस नहीं आ") is never denied by its own words."""
+    if match.group().isascii():
+        return bool(_NEGATION_BEFORE.search(text, max(0, match.start() - _LOOKBEHIND_CHARS), match.start()))
+    return not _NEGATION_AFTER.isdisjoint(_NEXT_TWO_TOKENS.match(text, match.end()).groups())
+
+
+def _scan(text):
     for kw, pattern in _PATTERNS:
-        if pattern.search(t):
-            return kw
+        for match in pattern.finditer(text):
+            if not _is_denied(text, match):
+                return kw
     return None
+
+
+def find_red_flag(text: str):
+    """Return the first keyword with an occurrence that is not denied, or None. Checks all languages.
+    Scans twice. The plain scan finds "chest\\npain". The second keeps the breaks normalising erases, so
+    "no - chest pain" and "no\\nchest pain" do not read as a denial. RED if either scan finds a keyword."""
+    raw = text or ""
+    return _scan(normalise(raw)) or _scan(normalise(_ERASED_BREAK.sub(" . ", raw)))

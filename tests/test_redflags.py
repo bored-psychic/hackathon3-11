@@ -49,6 +49,15 @@ MUST_NOT_CATCH_BY_MEANING = [
     "I want benefits",
     "ನನಗೆ ಈ ವಿಷಯ ಗೊತ್ತಿಲ್ಲ",
 ]
+MUST_NOT_CATCH_DENIAL = [
+    "no chest pain",
+    "I do not have chest pain",
+    "He is not unconscious",
+    "ನನಗೆ ಎದೆ ನೋವು ಇಲ್ಲ",
+    "நெஞ்சு வலி இல்லை",
+    "सीने में दर्द नहीं है",
+    "सांस नहीं फूल रही है",
+]
 
 # Natural phrasings beyond the brief's list, found by probing. The non-English ones need native-speaker review.
 NATURAL_PHRASINGS = [
@@ -170,3 +179,149 @@ class HistoryJoinTests(OfflineTestCase):
                 mock.patch("app.find_red_flag", return_value=None) as check:
             self.post("third", history=history)
         self.assertEqual(check.call_args_list[0].args[0], "first . second . third")
+
+
+class DenialGuardTests(OfflineTestCase):
+    def assert_red(self, *phrases):
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                self.assertTrue(find_red_flag(phrase), f"should be RED: {phrase}")
+
+    def assert_not_red(self, *phrases):
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                self.assertIsNone(find_red_flag(phrase), f"should not be RED: {phrase}")
+
+    def test_every_denial_phrase_is_not_red(self):
+        self.assert_not_red(*MUST_NOT_CATCH_DENIAL)
+
+    def test_every_denial_phrase_reaches_the_llm_through_chat(self):
+        for phrase in MUST_NOT_CATCH_DENIAL:
+            with self.subTest(phrase=phrase):
+                response, llm = self.chat_with_llm({"type": "final", "level": "GREEN"}, message=phrase)
+                self.assertEqual(response.get_json()["level"], "GREEN")
+                llm.assert_called_once()
+
+    def test_every_listed_english_negation_denies(self):
+        for negation in ("no", "not", "never", "without", "don't have", "do not have", "doesn't have",
+                         "does not have", "didn't have", "did not have"):
+            for filler in ("", "any ", "a "):
+                self.assert_not_red(f"{negation} {filler}chest pain", f"I {negation} {filler}CHEST-PAIN")
+
+    def test_curly_apostrophe_negation_denies(self):
+        self.assert_not_red("I don’t have chest pain", "he didn’t have a seizure")
+
+    def test_negation_not_on_the_list_stays_red(self):
+        self.assert_red("dont have chest pain", "he isn't unconscious", "she hasn't had a stroke",
+                        "I am not having chest pain", "never had chest pain", "not really unconscious")
+
+    def test_a_word_between_negation_and_keyword_stays_red(self):
+        self.assert_red("no severe chest pain", "no fever or chest pain", "no such chest pain",
+                        "no any a chest pain")
+
+    def test_negation_must_be_a_whole_word(self):
+        self.assert_red("piano chest pain", "knot chest pain", "casino chest pain")
+
+    def test_punctuation_after_the_negation_stays_red(self):
+        for mark in ".,;!?":
+            self.assert_red(f"no{mark} chest pain", f"no {mark} chest pain", f"not{mark}chest pain")
+
+    def test_a_break_that_normalising_would_erase_stays_red(self):
+        self.assert_red("no - chest pain", "no -chest pain", "no- chest pain", "no _ chest pain",
+                        "no\nchest pain", "no\r\nchest pain", "no \u2014 chest pain", "no\u2014chest pain",
+                        "सीने में दर्द - नहीं", "सीने में दर्द\nनहीं")
+
+    def test_a_hyphen_inside_a_phrase_still_denies(self):
+        self.assert_not_red("no chest-pain", "no-chest-pain")
+
+    def test_a_keyword_split_across_lines_is_still_found(self):
+        self.assert_red("chest\npain")
+
+    def test_any_undenied_occurrence_is_red(self):
+        self.assert_red("no chest pain. chest pain is back", "no chest pain chest pain", "chest pain no chest pain",
+                        "no chest pain but he collapsed", "सीने में दर्द नहीं पर सीने में दर्द है",
+                        "ಎದೆ ನೋವು ಇಲ್ಲ, ಎದೆ ನೋವು ಇದೆ")
+
+    def test_keyword_containing_a_negation_is_not_denied_by_its_own_words(self):
+        self.assert_red("not breathing", "he is not breathing", "cannot breathe", "can not breathe",
+                        "not able to breathe", "सांस नहीं आ रही", "साँस नहीं आ रही", "सांस नहीं ले पा रहा",
+                        "மூச்சு விட முடியவில்லை", "ಉಸಿರಾಡಲು ಆಗುತ್ತಿಲ್ಲ", "ಪ್ರಜ್ಞೆಯಿಲ್ಲ")
+
+    def test_keyword_containing_a_negation_can_be_denied_from_outside(self):
+        self.assert_not_red("no not breathing", "सांस नहीं आ रही नहीं")
+
+    def test_each_indian_language_negation_denies(self):
+        self.assert_not_red("सीने में दर्द नहीं", "सीने में दर्द नही", "ಎದೆ ನೋವು ಇಲ್ಲ", "நெஞ்சு வலி இல்லை",
+                            "ఛాతీ నొప్పి లేదు", "നെഞ്ചുവേദന ഇല്ല")
+
+    def test_negation_up_to_two_tokens_after_denies(self):
+        self.assert_not_red("सीने में दर्द बिल्कुल नहीं", "सीने में दर्द बिल्कुल नहीं है")  # needs native-speaker review
+
+    def test_negation_three_tokens_after_stays_red(self):
+        self.assert_red("सीने में दर्द है अभी नहीं")  # needs native-speaker review
+
+    def test_punctuation_before_the_indian_language_negation_stays_red(self):
+        for mark in (",", ".", ";", "!", "?", "।", ":"):
+            self.assert_red(f"सीने में दर्द{mark} नहीं", f"सीने में दर्द है{mark} नहीं", f"ಎದೆ ನೋವು{mark} ಇಲ್ಲ")
+
+    def test_punctuation_right_after_the_indian_language_negation_still_denies(self):
+        for mark in (".", ",", "!", "।"):
+            self.assert_not_red(f"सीने में दर्द नहीं{mark}", f"ಎದೆ ನೋವು ಇಲ್ಲ{mark}")
+
+    def test_negation_must_be_a_whole_token(self):
+        self.assert_red("ಎದೆ ನೋವು ಗೊತ್ತಿಲ್ಲ", "நெஞ்சு வலி முடியவில்லை")  # needs native-speaker review
+
+    def test_stem_keyword_skips_the_rest_of_its_word(self):
+        self.assert_not_red("दौरा पड़ा नहीं")  # needs native-speaker review
+        self.assert_red("दौरा पड़ा")
+
+    def test_each_rule_applies_only_to_its_own_script(self):
+        self.assert_red("no सीने में दर्द", "not ಎದೆ ನೋವು", "chest pain नहीं", "chest pain ಇಲ್ಲ",
+                        "नहीं, सीने में दर्द है", "नहीं सीने में दर्द है")
+
+    def test_romanised_keyword_uses_the_english_rule_only(self):
+        self.assert_not_red("no seene mein dard", "not behosh")
+        self.assert_red("seene mein dard nahi hai", "ede novu illa")  # needs native-speaker review
+
+    def test_emergency_that_uses_a_separate_negation_word_stays_red(self):
+        self.assert_red("ఊపిరి ఆడటం లేదు", "ఊపిరి ఆడడం లేదు", "खून बहना बंद नहीं हो रहा", "खून बंद नहीं हो रहा",
+                        "ಪ್ರಜ್ಞೆ ಇಲ್ಲ", "మూర్ఛ వచ్చింది", "ശ്വാസം ഇല്ല")  # needs native-speaker review
+
+
+class DenialThroughChatTests(OfflineTestCase):
+    GREEN = {"type": "final", "level": "GREEN"}
+
+    def assert_red_without_llm(self, message, history):
+        with mock.patch("app.call_llm") as llm:
+            body = self.post(message, history=history).get_json()
+        self.assertEqual(body["level"], "RED")
+        llm.assert_not_called()
+
+    def test_negation_cannot_cross_from_one_turn_to_the_next(self):
+        self.assert_red_without_llm("chest pain", [{"role": "user", "text": "no"}])
+        self.assert_red_without_llm("ಇಲ್ಲ", [{"role": "user", "text": "ಎದೆ ನೋವು"}])
+        self.assert_red_without_llm("नहीं", [{"role": "user", "text": "सीने में दर्द"}])
+
+    def test_answering_no_to_the_bot_is_not_red(self):
+        history = [{"role": "user", "text": "I feel unwell"}, {"role": "bot", "text": "Do you have chest pain?"}]
+        response, llm = self.chat_with_llm(self.GREEN, message="no chest pain", history=history)
+        self.assertEqual(response.get_json()["level"], "GREEN")
+        llm.assert_called_once()
+
+    def test_a_later_turn_can_still_report_the_denied_symptom(self):
+        self.assert_red_without_llm("now chest pain started", [{"role": "user", "text": "no chest pain"}])
+
+    def test_llm_listing_a_denied_symptom_is_not_overridden(self):
+        result = {**self.GREEN, "symptoms_en": ["no chest pain", "mild cough"]}
+        self.assertEqual(self.chat_with_llm(result)[0].get_json()["level"], "GREEN")
+
+    def test_negation_cannot_cross_between_llm_symptoms(self):
+        for symptoms in (["no", "chest pain"], ["cough without", "chest pain"], ["no fever", "chest pain"],
+                         ["no chest pain", "chest pain"], ["mild cough", "not", "unconscious"]):
+            with self.subTest(symptoms=symptoms):
+                body = self.chat_with_llm({**self.GREEN, "symptoms_en": symptoms})[0].get_json()
+                self.assertEqual(body["level"], "RED")
+
+    def test_llm_symptoms_sent_as_one_string_use_the_same_check(self):
+        self.assertEqual(self.chat_with_llm({**self.GREEN, "symptoms_en": "chest pain"})[0].get_json()["level"], "RED")
+        self.assertEqual(self.chat_with_llm({**self.GREEN, "symptoms_en": "no chest pain"})[0].get_json()["level"], "GREEN")
