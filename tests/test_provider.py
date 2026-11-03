@@ -156,19 +156,19 @@ class ResponseFormatRetryTests(ProviderTestCase):
 
 
 class RateLimitTests(ProviderTestCase):
-    def test_429_waits_60_seconds_and_retries_once(self):
+    def test_429_waits_3_seconds_and_retries_once(self):
         with self.assertLogs("app", level="WARNING"):
             result, post = self.call(error(429, "slow down"), completion())
         self.assertEqual(result, GREEN)
         self.assertEqual(post.call_count, 2)
-        self.sleep.assert_called_once_with(60)
+        self.sleep.assert_called_once_with(3)
 
     def test_second_429_is_not_retried_and_gives_the_error_reply(self):
         with mock.patch("requests.post", side_effect=[error(429, "slow down"), error(429, "slow down")]) as post, \
                 self.assertLogs("app", level="WARNING") as logs:
             response = self.post()
         self.assertEqual(post.call_count, 2)
-        self.sleep.assert_called_once_with(60)
+        self.sleep.assert_called_once_with(3)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"type": "error", "reply": chat_app.ERR_MSG["en"]})
         self.assertIn("status=429", "\n".join(logs.output))
@@ -183,7 +183,7 @@ class RateLimitTests(ProviderTestCase):
                 self.assertRaises(requests.HTTPError):
             chat_app.call_llm([], "m", "en")
         self.assertEqual(post.call_count, 3)
-        self.sleep.assert_called_once_with(60)
+        self.sleep.assert_called_once_with(3)
 
     def test_429_on_the_retry_without_response_format_still_waits_once(self):
         responses = [error(400, "response_format unsupported"), error(429, "slow down"), completion()]
@@ -192,7 +192,7 @@ class RateLimitTests(ProviderTestCase):
         self.assertEqual(result, GREEN)
         self.assertEqual(post.call_count, 3)
         self.assertNotIn("response_format", post.call_args.kwargs["json"])
-        self.sleep.assert_called_once_with(60)
+        self.sleep.assert_called_once_with(3)
 
     def test_red_flag_message_never_reaches_the_rate_limited_provider(self):
         with mock.patch("requests.post") as post:
@@ -229,7 +229,7 @@ class OpenRouterTests(ProviderTestCase):
 
 
 class GeminiTests(ProviderTestCase):
-    ENV = {"LLM_PROVIDER": "gemini", "LLM_API_KEY": KEY}
+    ENV = {"LLM_PROVIDER": "gemini", "GEMINI_API_KEY": KEY}
 
     def test_key_goes_in_the_goog_header_and_never_in_the_url(self):
         _, post = self.call(gemini())
@@ -247,18 +247,28 @@ class GeminiTests(ProviderTestCase):
         self.assertEqual(body["generationConfig"]["responseMimeType"], "application/json")
         self.assertIn("Reply ONLY in English", body["systemInstruction"]["parts"][0]["text"])
 
-    def test_gemini_key_and_model_are_fallbacks(self):
-        del os.environ["LLM_API_KEY"]
+    def test_gemini_reads_its_own_key_and_model(self):
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "old-key", "GEMINI_MODEL": "gemini-old"}):
             _, post = self.call(gemini())
         self.assertEqual(post.call_args.kwargs["headers"], {"x-goog-api-key": "old-key"})
         self.assertIn("/models/gemini-old:generateContent", post.call_args.args[0])
 
-    def test_llm_settings_win_over_the_fallbacks(self):
-        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "old-key", "GEMINI_MODEL": "gemini-old", "LLM_MODEL": "gemini-new"}):
+    def test_llm_model_wins_but_llm_api_key_is_never_sent_to_gemini(self):
+        with mock.patch.dict(os.environ, {"LLM_API_KEY": "groq-key", "GEMINI_API_KEY": "old-key",
+                                          "GEMINI_MODEL": "gemini-old", "LLM_MODEL": "gemini-new"}):
             _, post = self.call(gemini())
-        self.assertEqual(post.call_args.kwargs["headers"], {"x-goog-api-key": KEY})
+        self.assertEqual(post.call_args.kwargs["headers"], {"x-goog-api-key": "old-key"})
+        self.assertNotIn("groq-key", repr(post.call_args))
         self.assertIn("/models/gemini-new:generateContent", post.call_args.args[0])
+
+    def test_a_key_left_only_in_llm_api_key_is_not_sent_to_gemini(self):
+        del os.environ["GEMINI_API_KEY"]
+        with mock.patch.dict(os.environ, {"LLM_API_KEY": "groq-key"}), mock.patch("requests.post") as post, \
+                self.assertLogs("app", level="ERROR") as logs:
+            body = self.post().get_json()
+        post.assert_not_called()
+        self.assertEqual(body["type"], "error")
+        self.assertIn("GEMINI_API_KEY missing", "\n".join(logs.output))
 
     def test_429_goes_to_the_next_model_without_a_wait(self):
         with self.assertLogs("app", level="WARNING"):
@@ -384,9 +394,11 @@ class ListModelsTests(ProviderTestCase):
 
     def test_gemini_uses_its_header_and_prints_bare_ids(self):
         payload = {"models": [{"name": "models/gemini-x", "displayName": "X"}]}
-        code, out, _, get = self.run_main(["list_models.py", "gemini"], http_response(200, payload))
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}):
+            code, out, _, get = self.run_main(["list_models.py", "gemini"], http_response(200, payload))
         self.assertEqual((code, out), (0, "gemini-x\n"))
-        self.assertEqual(get.call_args.kwargs["headers"], {"x-goog-api-key": KEY})
+        self.assertEqual(get.call_args.kwargs["headers"], {"x-goog-api-key": "gemini-key"})
+        self.assertNotIn(KEY, repr(get.call_args))
 
     def test_refusal_prints_status_with_the_key_scrubbed(self):
         code, out, err, _ = self.run_main(["list_models.py"], error(401, f"bad key {KEY}"))

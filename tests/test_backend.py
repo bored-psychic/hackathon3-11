@@ -387,7 +387,7 @@ class ProfileSafetyTests(ProviderTestCase):
 
 
 class GeminiExtrasTests(ProviderTestCase):
-    ENV = {"LLM_PROVIDER": "gemini", "GEMINI_API_KEY": "test", "LLM_API_KEY": "test"}
+    ENV = {"LLM_PROVIDER": "gemini", "GEMINI_API_KEY": "test"}
 
     def urls(self, post):
         return [c.args[0].split("/models/")[1].split(":")[0] for c in post.call_args_list]

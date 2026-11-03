@@ -1,5 +1,5 @@
-import json, math, os, re, threading, time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import json, logging, math, os, re, threading, time
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 import requests
 from dotenv import load_dotenv
@@ -8,6 +8,7 @@ from redflags import find_red_flag
 
 load_dotenv(override=True)  # .env always wins over stale shell vars
 app = Flask(__name__)
+app.logger.setLevel(logging.INFO)  # Flask's default hides INFO, and the "answered by" line must show
 
 # Free providers only. OpenRouter has no default: choose a ":free" id with tests/list_models.py.
 OPENAI_COMPATIBLE = {
@@ -22,7 +23,10 @@ QUOTA_COOLDOWN_SECONDS = 15 * 60
 EXHAUSTED = {}  # model -> time until which it is skipped after a 429
 OPENAI_TIMEOUT_SECONDS = 20
 GEMINI_TIMEOUT_SECONDS = 25
-RATE_LIMIT_WAIT_SECONDS = 60
+RATE_LIMIT_WAIT_SECONDS = 3
+# Total for all attempts. /chat must answer within 35 s, so 1 s is kept for the rest of the request.
+# The frontend gives up at 40 s (CHAT_TIMEOUT_MS in static/app.js).
+CHAT_DEADLINE_SECONDS = 34
 LANG_NAMES = {"en": "English", "kn": "Kannada", "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "ml": "Malayalam"}
 LEVELS = ("RED", "AMBER", "GREEN")
 MAX_FOLLOW_UPS = 2
@@ -135,30 +139,23 @@ def llm_provider():
 
 
 def llm_api_key(provider):
-    key = os.getenv("LLM_API_KEY")
-    if not key and provider == "gemini":
-        key = os.getenv("GEMINI_API_KEY")
+    """Each provider reads only its own variable, so one provider's key can never reach another."""
+    name = "GEMINI_API_KEY" if provider == "gemini" else "LLM_API_KEY"
+    key = os.getenv(name)
     if not key:
-        raise LlmConfigError("LLM_API_KEY missing")
+        raise LlmConfigError(f"{name} missing")
     return key
 
 
-def one_wait_poster(url, headers, timeout):
-    """Returns post(body). On HTTP 429 it waits and retries once. Only one wait per poster, so
-    one call_llm never loops and never holds the user for more than one wait."""
-    waited = False
+class DeadlineExceeded(Exception):
+    """The /chat time budget is spent. Holds no text, so it is safe to log."""
 
-    def post(body):
-        nonlocal waited
-        r = requests.post(url, headers=headers, json=body, timeout=timeout)
-        if r.status_code == 429 and not waited:
-            waited = True
-            app.logger.warning("LLM rate limited (HTTP 429): waiting %ss, then retrying once", RATE_LIMIT_WAIT_SECONDS)
-            time.sleep(RATE_LIMIT_WAIT_SECONDS)
-            r = requests.post(url, headers=headers, json=body, timeout=timeout)
-        return r
 
-    return post
+def seconds_left(deadline):
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise DeadlineExceeded()
+    return left
 
 
 def rejects_response_format(r):
@@ -169,7 +166,10 @@ def rejects_response_format(r):
     return any(s in text for s in ("response_format", "response format", "json_object", "json_validate_failed", "json mode"))
 
 
-def call_openai_compatible(provider, key, system, history, message):
+def openai_compatible_caller(provider, system, history, message, deadline):
+    """Returns ask(), which tries the provider once. A refusal of JSON mode is remembered, so a retry
+    after a wait does not ask for JSON mode again. Raises LlmConfigError now if settings are missing."""
+    key = llm_api_key(provider)
     settings = OPENAI_COMPATIBLE[provider]
     model = os.getenv("LLM_MODEL") or settings["model"]
     if not model:
@@ -179,22 +179,32 @@ def call_openai_compatible(provider, key, system, history, message):
         messages.append({"role": "user" if h.get("role") == "user" else "assistant", "content": h.get("text", "")})
     messages.append({"role": "user", "content": message})
     body = {"model": model, "messages": messages, "temperature": 0.2}
-    post = one_wait_poster(f"{settings['base']}/chat/completions", {"Authorization": f"Bearer {key}"},
-                           OPENAI_TIMEOUT_SECONDS)
-    r = post({**body, "response_format": {"type": "json_object"}})
-    if rejects_response_format(r):
-        r = post(body)  # the prompt and strip_fences still get JSON out of the reply
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    json_mode = True
+
+    def post(payload):
+        return requests.post(f"{settings['base']}/chat/completions", headers={"Authorization": f"Bearer {key}"},
+                             json=payload, timeout=min(OPENAI_TIMEOUT_SECONDS, seconds_left(deadline)))
+
+    def ask():
+        nonlocal json_mode
+        r = post({**body, "response_format": {"type": "json_object"}} if json_mode else body)
+        if json_mode and rejects_response_format(r):
+            json_mode = False
+            r = post(body)  # the prompt and strip_fences still get JSON out of the reply
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
+
+    return ask
 
 
-def gemini_models():
-    """LLM_MODEL if set, else the comma-separated GEMINI_MODEL list, else the default list."""
-    names = os.getenv("LLM_MODEL") or os.getenv("GEMINI_MODEL") or ""
+def gemini_models(is_fallback=False):
+    """The comma-separated GEMINI_MODEL list, else the default list. LLM_MODEL wins only when Gemini is the
+    chosen provider: when Gemini is the fallback, LLM_MODEL names the other provider's model."""
+    names = (not is_fallback and os.getenv("LLM_MODEL")) or os.getenv("GEMINI_MODEL") or ""
     return [m.strip() for m in names.split(",") if m.strip()] or GEMINI_DEFAULT_MODELS.split(",")
 
 
-def post_gemini(key, models, body):
+def post_gemini(key, models, body, deadline):
     """POST to the first model that answers. 500/503: one short retry on the same model, then the next
     model. 429: skip that model for a while and try the next. 404: a retired name, try the next.
     Anything else, such as a 403 for the whole project, stops here. Logs positions, not model names."""
@@ -202,11 +212,14 @@ def post_gemini(key, models, body):
     candidates = [m for m in models if EXHAUSTED.get(m, 0) <= now] or models  # all limited: try anyway
     last = None
     for position, model in enumerate(candidates, 1):
-        url = f"{GEMINI_BASE}/models/{model}:generateContent"
-        r = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=GEMINI_TIMEOUT_SECONDS)
-        if r.status_code in (500, 503):
+        def post():
+            return requests.post(f"{GEMINI_BASE}/models/{model}:generateContent", headers={"x-goog-api-key": key},
+                                 json=body, timeout=min(GEMINI_TIMEOUT_SECONDS, seconds_left(deadline)))
+
+        r = post()
+        if r.status_code in (500, 503) and seconds_left(deadline) > GEMINI_RETRY_PAUSE_SECONDS:
             time.sleep(GEMINI_RETRY_PAUSE_SECONDS)
-            r = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=GEMINI_TIMEOUT_SECONDS)
+            r = post()
         if r.status_code == 429:
             EXHAUSTED[model] = time.time() + QUOTA_COOLDOWN_SECONDS
         if r.status_code not in (404, 429, 500, 503):
@@ -224,7 +237,9 @@ def gemini_text(response):
     return "".join(p.get("text", "") for p in parts if not p.get("thought"))
 
 
-def call_gemini(key, system, history, message):
+def gemini_caller(models, system, history, message, deadline):
+    """Returns ask(), which tries the models once. Raises LlmConfigError now if the key is missing."""
+    key = llm_api_key("gemini")
     contents = []
     for h in history[-10:]:
         role = "user" if h.get("role") == "user" else "model"
@@ -235,7 +250,7 @@ def call_gemini(key, system, history, message):
         "contents": contents,
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
     }
-    return gemini_text(post_gemini(key, gemini_models(), body))
+    return lambda: gemini_text(post_gemini(key, models, body, deadline))
 
 
 def build_system_prompt(lang, force_final, profile):
@@ -251,17 +266,72 @@ def build_system_prompt(lang, force_final, profile):
     return system
 
 
+def http_status(error):
+    return getattr(getattr(error, "response", None), "status_code", None)
+
+
+def provider_is_down(error):
+    """A failure that another provider could get past: 429, 5xx, a timeout or a connection error, and
+    401, because a key this provider rejects says nothing about the next provider's key."""
+    if isinstance(error, (requests.Timeout, requests.ConnectionError)):
+        return True
+    status = http_status(error)
+    return isinstance(status, int) and (status in (401, 429) or status >= 500)
+
+
+def answer_from(provider, ask):
+    out = json.loads(strip_fences(ask()))
+    app.logger.info("LLM answered by %s", provider)
+    return out
+
+
 def call_llm(history, message, lang, force_final=False, profile=""):
+    """The chosen provider first. If it is down, Gemini gets the same request, when GEMINI_API_KEY is set.
+    After a 429, if that fails too or is not set, wait briefly and try the chosen provider once more."""
+    deadline = time.monotonic() + CHAT_DEADLINE_SECONDS
     provider = llm_provider()
     if provider != "gemini" and provider not in OPENAI_COMPATIBLE:
         raise LlmConfigError("LLM_PROVIDER must be groq, openrouter or gemini")
-    key = llm_api_key(provider)
     system = build_system_prompt(lang, force_final, profile)
     if provider == "gemini":
-        text = call_gemini(key, system, history, message)
+        ask = gemini_caller(gemini_models(), system, history, message, deadline)
     else:
-        text = call_openai_compatible(provider, key, system, history, message)
-    return json.loads(strip_fences(text))
+        ask = openai_compatible_caller(provider, system, history, message, deadline)
+
+    try:
+        return answer_from(provider, ask)
+    except Exception as e:
+        if not provider_is_down(e):
+            raise
+        failure = e
+    app.logger.warning("%s failed: %s", provider, failure_text(failure))
+
+    if provider != "gemini" and os.getenv("GEMINI_API_KEY"):
+        try:
+            return answer_from("gemini", gemini_caller(gemini_models(is_fallback=True), system, history, message, deadline))
+        except Exception as e:
+            app.logger.warning("gemini fallback failed: %s", failure_text(e))
+
+    if http_status(failure) != 429 or deadline - time.monotonic() <= RATE_LIMIT_WAIT_SECONDS:
+        raise failure
+    time.sleep(RATE_LIMIT_WAIT_SECONDS)
+    return answer_from(provider, ask)
+
+
+def run_with_deadline(work, seconds):
+    """Returns work(), or raises its exception, or raises TimeoutError once `seconds` pass. Request timeouts
+    alone cannot promise this: a slow DNS lookup or a server sending a little at a time is not limited by
+    them. The thread is left to finish on its own, and seconds_left stops it from starting a new request."""
+    future = Future()
+
+    def worker():
+        try:
+            future.set_result(work())
+        except BaseException as e:  # anything, so the caller sees exactly what happened
+            future.set_exception(e)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return future.result(timeout=seconds)
 
 
 def scrubbed_error_text(response):
@@ -277,6 +347,13 @@ def scrubbed_error_text(response):
         if key:
             text = text.replace(key, "***")
     return text[:200]
+
+
+def failure_text(error):
+    """For logs. Our own config error is the only text taken from an exception: a requests error
+    carries request details."""
+    detail = str(error) if isinstance(error, LlmConfigError) else scrubbed_error_text(getattr(error, "response", None))
+    return f"{type(error).__name__} status={http_status(error)} {detail}"
 
 
 def as_text(value):
@@ -370,13 +447,12 @@ def chat():
 
     # Step 4: LLM
     force_final = sum(1 for h in history if h.get("role") == "bot") >= MAX_FOLLOW_UPS
+    profile = profile_summary(data.get("profile"))
     try:
-        out = call_llm(history, message, lang, force_final=force_final, profile=profile_summary(data.get("profile")))
+        out = run_with_deadline(lambda: call_llm(history, message, lang, force_final=force_final, profile=profile),
+                                CHAT_DEADLINE_SECONDS)
     except Exception as e:
-        # never log str(e) from anything but our own config error: a requests error carries request details
-        status = getattr(getattr(e, "response", None), "status_code", None)
-        detail = str(e) if isinstance(e, LlmConfigError) else scrubbed_error_text(getattr(e, "response", None))
-        app.logger.error("LLM failed: %s status=%s %s", type(e).__name__, status, detail)
+        app.logger.error("LLM failed: %s", failure_text(e))
         return jsonify({"type": "error", "reply": ERR_MSG[lang]})
 
     result = normalize_llm(out, lang)

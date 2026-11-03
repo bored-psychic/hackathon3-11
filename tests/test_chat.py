@@ -14,6 +14,7 @@ import unittest
 from unittest import mock
 
 import requests
+from flask.logging import default_handler
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
@@ -23,6 +24,8 @@ with mock.patch("dotenv.load_dotenv"):
     import app as chat_app
 
 from redflags import find_red_flag  # noqa: E402
+
+default_handler.setLevel(logging.WARNING)  # keeps the "LLM answered by" INFO lines out of the test output
 
 LANGS = ("en", "kn", "hi", "ta", "te", "ml")
 RED_SENTENCE = {
