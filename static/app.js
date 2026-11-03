@@ -131,7 +131,7 @@
     langSel.value = code;
     applyLanguage();
     refreshListenButtons();
-    if (noteEl) noteEl.textContent = '🌐 ' + t('langSwitched', { lang: langName(code) });
+    if (noteEl) noteEl.textContent = t('langSwitched', { lang: langName(code) });
     return true;
   }
   // First visit: use the phone's language if we support it, else Kannada.
@@ -243,9 +243,32 @@
     route();
   }
 
+  // Split screen: the art panel (3D form, logo, big title) is built once and kept; only the card pane is re-rendered.
+  function loginPane() {
+    var v = $('view-login'), split = v.querySelector('.login-split');
+    if (!split) {
+      v.textContent = '';
+      var logo = icon('cross');
+      logo.setAttribute('class', 'login-logo');
+      split = h('div', { class: 'login-split' }, [
+        h('aside', { class: 'login-art', 'aria-hidden': 'true' }, [
+          h('div', { class: 'fx-host login-fx' }, [h('div', { class: 'fx-fallback' })]),
+          logo,
+          h('div', { class: 'login-copy' }, [h('p', { class: 'display', id: 'loginDisplay' }), h('p', { class: 'display-sub', id: 'loginDisplaySub' })])
+        ]),
+        h('div', { class: 'login-pane' })
+      ]);
+      v.appendChild(split);
+    }
+    $('loginDisplay').textContent = t('appName');
+    $('loginDisplaySub').textContent = t('heroSub');
+    var pane = split.querySelector('.login-pane');
+    pane.textContent = '';
+    return pane;
+  }
+
   function renderLogin() {
-    var v = $('view-login');
-    v.textContent = '';
+    var pane = loginPane();
     function digitsOnly(el) { el.value = el.value.replace(/\D/g, ''); }
     var demo = h('p', { class: 'demochip', text: t('demoCode') });
     var err = h('p', { class: 'err-text', role: 'alert', text: login.err });
@@ -254,7 +277,7 @@
       var ph = first = h('input', { type: 'tel', id: 'lph', inputmode: 'numeric', autocomplete: 'tel-national', maxlength: 10 });
       ph.value = login.num;
       ph.addEventListener('input', function () { digitsOnly(ph); login.num = ph.value; });
-      v.appendChild(h('form', { class: 'card loginbox', onsubmit: function (e) {
+      pane.appendChild(h('form', { class: 'card loginbox', onsubmit: function (e) {
         e.preventDefault();
         if (!/^\d{10}$/.test(ph.value)) { login.err = t('badPhone'); err.textContent = login.err; ph.focus(); return; }
         login.num = ph.value; login.step = 'code'; login.err = ''; renderLogin();
@@ -268,9 +291,20 @@
         demo
       ]));
     } else {
-      var code = first = h('input', { type: 'text', id: 'lcode', class: 'codein', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6 });
-      code.addEventListener('input', function () { digitsOnly(code); });
-      v.appendChild(h('form', { class: 'card loginbox', onsubmit: function (e) {
+      // Six visual cells mirror one real input (so autofill of one-time codes keeps working).
+      var code = first = h('input', { type: 'text', id: 'lcode', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 6 });
+      var cells = [0, 1, 2, 3, 4, 5].map(function () { return h('span'); });
+      var paint = function () {
+        digitsOnly(code);
+        cells.forEach(function (c, i) {
+          c.textContent = code.value.charAt(i);
+          c.classList.toggle('cur', i === Math.min(code.value.length, 5));
+        });
+      };
+      code.addEventListener('input', paint);
+      paint();
+      var wrap = h('div', { class: 'codewrap' }, [h('div', { class: 'cells', 'aria-hidden': 'true' }, cells), code]);
+      pane.appendChild(h('form', { class: 'card loginbox', onsubmit: function (e) {
         e.preventDefault();
         if (code.value !== DEMO_CODE) { err.textContent = t('badCode'); code.focus(); return; }
         signIn(login.num);
@@ -279,7 +313,7 @@
           onclick: function () { login.step = 'phone'; login.err = ''; renderLogin(); } }),
         h('h2', { text: t('codeTitle') }),
         h('p', { class: 'muted', text: t('codeSent', { num: login.num.slice(0, 5) + ' ' + login.num.slice(5) }) }),
-        h('div', { class: 'field' }, [h('label', { for: 'lcode', text: t('codeLbl') }), code]),
+        h('div', { class: 'field' }, [h('label', { for: 'lcode', text: t('codeLbl') }), wrap]),
         err,
         h('button', { class: 'btn primary big', type: 'submit', text: t('verify') }),
         demo
@@ -340,8 +374,9 @@
 
     // Hero banner with the main action
     v.appendChild(h('section', { class: 'hero' }, [
+      h('div', { class: 'fx-host hero-fx', 'aria-hidden': 'true' }, [h('div', { class: 'fx-fallback' })]),
       h('div', { class: 'hero-date', text: fmtDate(Date.now(), { weekday: 'long', day: 'numeric', month: 'long' }) }),
-      h('h2', { text: t('hello') + ' 🙏' }),
+      h('h2', { text: t('hello') }),
       h('p', { class: 'hero-sub', text: t('heroSub') }),
       h('button', { class: 'btn hero-btn', type: 'button', onclick: function () { startCheckFor(''); } }, [icon('chat'), t('startCheck')])
     ]));
@@ -917,7 +952,8 @@
       v.appendChild(h('div', { class: 'filters', role: 'group' }, FILTERS.map(function (f) {
         var n = f[0] === 'all' ? P.list.length : P.list.filter(function (p) { return p.kind === f[0]; }).length;
         return h('button', { type: 'button', 'aria-pressed': String(near.filter === f[0]),
-          onclick: function () { near.filter = f[0]; renderNear(); } }, [t(f[1]) + ' (' + n + ')']);
+          onclick: function () { near.filter = f[0]; renderNear(); } },
+          [near.filter === f[0] ? h('span', { class: 'pill', 'data-flip-id': 'fpill', 'aria-hidden': 'true' }) : null, t(f[1]) + ' (' + n + ')']);
       })));
 
       // Recommended speciality from the symptom check
