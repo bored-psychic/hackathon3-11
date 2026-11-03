@@ -181,6 +181,10 @@ def chat():
             body = e.response.json().get("error", {}).get("message", "")[:200]
         except Exception:
             pass
+        # Google's error text can quote the key itself (e.g. a suspended-consumer 403)
+        key = os.getenv("GEMINI_API_KEY")
+        if key:
+            body = body.replace(key, "***")
         app.logger.error("LLM failed: %s status=%s %s", type(e).__name__, status, body)
         return jsonify({"type": "error", "reply": ERR_MSG[lang]})
 
