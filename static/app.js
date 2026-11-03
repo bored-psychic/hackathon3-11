@@ -981,7 +981,7 @@
       v.appendChild(h('div', { class: 'filters', role: 'group' }, FILTERS.map(function (f) {
         var n = f[0] === 'all' ? P.list.length : P.list.filter(function (p) { return p.kind === f[0]; }).length;
         return h('button', { type: 'button', 'aria-pressed': String(near.filter === f[0]),
-          onclick: function () { near.filter = f[0]; renderNear(); } },
+          onclick: function () { var st = mo('pillState'); near.filter = f[0]; renderNear(); mo('pillGlide', st); } },
           [near.filter === f[0] ? h('span', { class: 'pill', 'data-flip-id': 'fpill', 'aria-hidden': 'true' }) : null, t(f[1]) + ' (' + n + ')']);
       })));
 

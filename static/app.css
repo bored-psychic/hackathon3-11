@@ -595,7 +595,7 @@ html.motion .tabbar a, html.motion .tabbar .ico { position: relative; }
 html.motion .tabbar svg, html.motion .tabbar a > span:not(.tab-ind) { position: relative; z-index: 1; }
 html.motion .tabbar a[aria-current="page"], html.motion .tabbar a[aria-current="page"] .ico { background: transparent; }
 html.motion .filters button { position: relative; isolation: isolate; }
-html.motion .filters button[aria-pressed="true"] { background: transparent; }
+html.motion .filters button[aria-pressed="true"] { background: transparent; z-index: 1; }
 html.motion .filters .pill { display: block; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--brand); }
 .call { position: relative; isolation: isolate; }
 .call-ring { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--red); pointer-events: none; will-change: transform, opacity; }

@@ -11,7 +11,7 @@
 
   var g = window.gsap;
   var HOOKS = ['enterView', 'transition', 'login', 'shake', 'errIn', 'bubble', 'chips', 'typing', 'clear', 'result',
-    'echo', 'tabs', 'list', 'expand', 'collapse', 'crossfade', 'fx'];
+    'echo', 'tabs', 'list', 'expand', 'collapse', 'crossfade', 'fx', 'pillState', 'pillGlide'];
   var NOOP = { tier: 'off', active: function () { return 0; } };
   HOOKS.forEach(function (n) { NOOP[n] = function () {}; });
 
@@ -310,6 +310,17 @@
     if (el) g.fromTo(el, { opacity: .35 }, { opacity: 1, duration: D(.35), ease: 'power1.out', clearProps: 'opacity' });
   }
 
+  /* ---------- Nearby: the active filter pill glides between chips (the chips are rebuilt, Flip matches them by data-flip-id) ---------- */
+  function pillState() {
+    var p = document.querySelector('.filters .pill');
+    return p && window.Flip ? window.Flip.getState(p) : null;
+  }
+  function pillGlide(st) {
+    var p = document.querySelector('.filters .pill');
+    if (!st || !p) return;
+    window.Flip.from(st, { targets: p, duration: D(.38), ease: 'power3.out', scale: true, onComplete: function () { g.set(p, { clearProps: 'transform' }); } });
+  }
+
   /* ---------- subtle magnetic hover on the main buttons (desktop pointer only) ---------- */
   (function magnet() {
     var sel = '.hero-btn, .btn.primary, .cta', cur = null;
@@ -400,6 +411,7 @@
     login: loginIn, shake: shake, errIn: errIn,
     bubble: bubble, chips: chips, typing: typing, clear: clearLoops,
     result: result, echo: echo, tabs: tabs, list: list, expand: expand, collapse: collapse, crossfade: crossfade,
+    pillState: pillState, pillGlide: pillGlide,
     fx: fxSync,
     _S: S
   };
