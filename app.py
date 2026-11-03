@@ -4,10 +4,10 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 from redflags import find_red_flag
 
-load_dotenv()
+load_dotenv(override=True)  # .env always wins over stale shell vars
 app = Flask(__name__)
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 LANG_NAMES = {"en": "English", "kn": "Kannada", "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "ml": "Malayalam"}
 
 RED_MSG = {
@@ -96,7 +96,14 @@ def chat():
     try:
         out = call_llm(history, message, lang)
     except Exception as e:
-        app.logger.error("LLM failed: %s", e)
+        # never log str(e): requests errors include the URL, which contains the API key
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        body = ""
+        try:
+            body = e.response.json().get("error", {}).get("message", "")[:200]
+        except Exception:
+            pass
+        app.logger.error("LLM failed: %s status=%s %s", type(e).__name__, status, body)
         return jsonify({"type": "error", "reply": ERR_MSG[lang]})
 
     # Step 5: safety override on LLM's English symptom list
