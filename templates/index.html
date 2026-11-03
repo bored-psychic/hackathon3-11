@@ -3,13 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0a7d4f">
+<meta name="theme-color" content="#0F766E">
 <meta name="description" content="Symptom check, family health records and nearby health centres for rural Karnataka.">
 <title>Health Check</title>
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}" type="image/svg+xml">
 <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.svg') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=4">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=5">
 </head>
 <body>
 
@@ -64,7 +67,7 @@
   <a href="#family" data-tab="family"><span class="ico" data-icon="people"></span><span data-i18n="navFamily">Family</span></a>
 </nav>
 
-<script src="{{ url_for('static', filename='i18n.js') }}?v=4"></script>
-<script src="{{ url_for('static', filename='app.js') }}?v=4"></script>
+<script src="{{ url_for('static', filename='i18n.js') }}?v=5"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=5"></script>
 </body>
 </html>

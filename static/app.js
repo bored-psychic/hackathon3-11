@@ -19,8 +19,8 @@
   var RELATIONS = ['self', 'spouse', 'child', 'parent', 'grandparent', 'sibling', 'other'];
   var HELPLINES = ['108', '112', '104', '14416'];
   var FILTERS = [['all', 'fAll'], ['govt', 'fGovt'], ['hospital', 'fHospital'], ['clinic', 'fClinic'], ['ngo', 'fNgo']];
-  var AVATAR_COLORS = ['#0a7d4f', '#1565c0', '#6a1b9a', '#c2185b', '#ef6c00', '#00838f'];
-  var KIND_COLORS = { govt: '#0a7d4f', hospital: '#c62828', clinic: '#1565c0', ngo: '#6a1b9a' };
+  var AVATAR_COLORS = ['#0F766E', '#1565c0', '#6a1b9a', '#c2185b', '#b45309', '#00838f'];
+  var KIND_COLORS = { govt: '#0F766E', hospital: '#c62828', clinic: '#1565c0', ngo: '#6a1b9a' };
 
   var ICONS = {
     home: '<path d="M12 3 2 12h3v8h5v-6h4v6h5v-8h3z"/>',
@@ -818,13 +818,13 @@
         var p = x.p, phone = firstPhone(p.phone), match = offers(p, spec);
         var extra = (p.specialties || []).filter(function (s) { return s !== 'emergency' && s !== spec; });
         v.appendChild(h('div', { class: 'card place ' + p.kind + (match ? ' match' : '') }, [
-          h('span', { class: 'k-ico', style: 'background:' + (KIND_COLORS[p.kind] || '#0a7d4f') }, [icon('cross')]),
+          h('span', { class: 'k-ico', style: 'background:' + (KIND_COLORS[p.kind] || '#0F766E') }, [icon('cross')]),
           h('div', { class: 'body' }, [
             h('div', { class: 'head' }, [
               h('div', null, [h('div', { class: 'pname', text: p.name }), p.local_name ? h('div', { class: 'local', text: p.local_name }) : null]),
               h('span', { class: 'dist', text: t('km', { n: fmtKm(x.km) }) })
             ]),
-            h('div', { class: 'kind', style: 'color:' + (KIND_COLORS[p.kind] || '#0a7d4f') },
+            h('div', { class: 'kind', style: 'color:' + (KIND_COLORS[p.kind] || '#0F766E') },
               [t('s_' + p.sub), p.emergency ? ' ' : null, p.emergency ? h('span', { class: 'badge em', text: t('emergency24') }) : null]),
             match && spec !== 'emergency' ? h('div', null, [h('span', { class: 'badge spec', text: '★ ' + specLabel })]) : null,
             extra.length ? h('div', { class: 'spchips' }, extra.map(function (s) { return h('span', { class: 'chip', text: t('sp_' + s) }); })) : null,
