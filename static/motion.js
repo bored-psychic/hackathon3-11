@@ -22,8 +22,19 @@
   g.config({ nullTargetWarn: false });
   document.documentElement.classList.add('motion');
 
-  /* ---------- settings (tiers refine these further down) ---------- */
-  var S = { tier: 'full', k: 1, split: true, blur: true, magnet: true, scroll: true };
+  /* ---------- tiers ----------
+     full: desktop with enough memory. Everything, including Three.js.
+     lite: phones and low-power devices. Durations x0.7, transform/opacity only, no line splitting, no blur,
+           no magnetic hover, no ScrollTrigger, no Three.js.
+     off:  prefers-reduced-motion (or GSAP missing). window.Motion is all no-ops, content shows instantly. */
+  function pickTier() {
+    var c = navigator.connection;
+    var lite = window.innerWidth < 1024 || (navigator.deviceMemory && navigator.deviceMemory < 4) ||
+      (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 2) || (c && c.saveData);
+    return lite ? { tier: 'lite', k: .7, split: false, blur: false, magnet: false, scroll: false }
+      : { tier: 'full', k: 1, split: true, blur: true, magnet: true, scroll: true };
+  }
+  var S = pickTier();
   function D(x) { return x * S.k; }
   function arr(x) { return !x ? [] : x.nodeType ? [x] : Array.prototype.slice.call(x); }
   function plain(els) { g.set(els, { clearProps: 'transform,opacity,filter,visibility' }); }
@@ -65,6 +76,7 @@
   // The outgoing view is replaced by a non-interactive snapshot that fades and slides 12px, so input is never blocked.
   function ghost(prev) {
     if (!prev || !prev.parentNode) return;
+    if (S.tier === 'lite' && prev.getElementsByTagName('*').length > 250) return; // a big clone costs more than it shows
     document.querySelectorAll('.view-ghost').forEach(function (n) { n.remove(); });
     var c = prev.cloneNode(true);
     c.removeAttribute('hidden'); c.removeAttribute('id');
@@ -224,6 +236,7 @@
   function clearLoops() {
     waves.concat(rings).forEach(function (t) { try { t.kill(); } catch (e) {} });
     waves = []; rings = [];
+    document.querySelectorAll('.call-ring').forEach(function (n) { n.remove(); });
   }
 
   /* ---------- result card ---------- */
@@ -234,8 +247,12 @@
       // SAFETY: no opacity, no delay, no scale on the card or its text. Only the level word punches and the ring pulses.
       if (word) g.fromTo(word, { scale: 1.15 }, { scale: 1, duration: .3, ease: 'power2.out', transformOrigin: 'left center', clearProps: 'transform' });
       if (call) {
-        rings.push(g.fromTo(call, { boxShadow: '0 0 0 0 rgba(180,35,24,.55)' },
-          { boxShadow: '0 0 0 14px rgba(180,35,24,0)', duration: 1.4, ease: 'power1.out', repeat: -1 }));
+        var ring = document.createElement('span');
+        ring.className = 'call-ring'; ring.setAttribute('aria-hidden', 'true');
+        call.appendChild(ring);
+        var r = call.getBoundingClientRect(); // grow by the same 14px on every side
+        rings.push(g.fromTo(ring, { scaleX: 1, scaleY: 1, opacity: .55 },
+          { scaleX: 1 + 28 / (r.width || 300), scaleY: 1 + 28 / (r.height || 58), opacity: 0, duration: 1.4, ease: 'power1.out', repeat: -1 }));
       }
       return;
     }
@@ -257,14 +274,19 @@
     if (!els.length) return;
     var view = els[0].closest('.view');
     if (view) view._listAt = Date.now();
-    g.fromTo(els, { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: D(.45), ease: 'power3.out',
-      stagger: Math.min(.06, .6 / els.length), clearProps: 'transform,opacity' });
-    if (kind === 'near') els.forEach(function (e) { var d = e.querySelector('.dist'); if (d) countUp(d, D(.8)); });
+    var some = S.tier === 'lite' ? els.slice(0, 8) : els; // on a cheap phone only what can be on screen animates
+    g.fromTo(some, { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: D(.45), ease: 'power3.out',
+      stagger: Math.min(.06, .6 / some.length), clearProps: 'transform,opacity' });
+    if (kind === 'near') some.forEach(function (e) { var d = e.querySelector('.dist'); if (d) countUp(d, D(.8)); });
   }
   function expand(form) {
     g.delayedCall(0, function () {
       var view = form.closest('.view');
       if (!form.isConnected || (view && view._entering)) return;
+      if (S.tier === 'lite') {
+        g.fromTo(form, { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: D(.45), ease: 'power3.out', clearProps: 'transform,opacity' });
+        return;
+      }
       var h0 = form.offsetHeight;
       g.fromTo(form, { height: 0, opacity: 0, overflow: 'hidden' }, { height: h0, opacity: 1, duration: D(.45), ease: 'power3.out',
         onComplete: function () { g.set(form, { clearProps: 'height,opacity,overflow' }); } });
@@ -273,6 +295,11 @@
   function collapse(card, cb) {
     var fin = done(cb);
     try {
+      if (S.tier === 'lite') {
+        g.to(card, { opacity: 0, scale: .96, duration: D(.28), ease: 'power2.in', onComplete: fin });
+        g.delayedCall(.7, fin);
+        return true;
+      }
       g.to(card, { opacity: 0, height: 0, paddingTop: 0, paddingBottom: 0, marginBottom: 0, borderWidth: 0, overflow: 'hidden',
         duration: D(.32), ease: 'power2.inOut', onComplete: fin });
       g.delayedCall(.7, fin);
@@ -333,7 +360,31 @@
     // Let the first choreography play before parsing Three.js.
     if (window.requestIdleCallback) window.requestIdleCallback(load, { timeout: 900 }); else setTimeout(load, 500);
   }
-  window.addEventListener('resize', function () { clearTimeout(fxSync._t); fxSync._t = setTimeout(function () { if (fxWanted) fxSync(fxWanted); }, 200); });
+  window.addEventListener('resize', function () {
+    clearTimeout(fxSync._t);
+    fxSync._t = setTimeout(function () {
+      var next = pickTier();
+      for (var k in next) S[k] = next[k];
+      if (window.Motion) window.Motion.tier = S.tier;
+      if (fxWanted) fxSync(fxWanted);
+    }, 200);
+  });
+
+  // "Reduce motion" switched on while the app is open: finish everything at its natural state and stop for good.
+  function goOff() {
+    clearLoops();
+    g.globalTimeline.getChildren(true, true, true).forEach(function (t) { try { t.totalProgress(1).kill(); } catch (e) {} });
+    if (window.ScrollTrigger) window.ScrollTrigger.getAll().forEach(function (t) { t.kill(); });
+    g.set('#main *', { clearProps: 'opacity,transform,filter,visibility' });
+    document.querySelectorAll('.view-ghost').forEach(function (n) { n.remove(); });
+    document.documentElement.classList.remove('motion');
+    if (window.FX3D) { try { window.FX3D.off(); } catch (e) {} }
+    fxState = 'no';
+    S.magnet = false;
+    window.Motion = NOOP;
+  }
+  var rm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  if (rm && rm.addEventListener) rm.addEventListener('change', function (e) { if (e.matches) goOff(); });
 
   /* ---------- public API ---------- */
   window.Motion = {

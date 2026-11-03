@@ -22,6 +22,13 @@ When a provider fails, `/chat` still answers within 35 seconds, in the user's la
 
 Messages over 1000 characters return HTTP 400 `{"error":"too_long"}`, and malformed requests return HTTP 400 `{"error":"bad_request"}`, unless the message contains a red flag, which still returns RED.
 
+## Motion and 3D (frontend only)
+GSAP and Three.js are vendored in `static/vendor/` (versions and licences in its README), so the app needs no CDN. Google Fonts is the only external request.
+- `static/motion.js` holds the choreography behind `window.Motion`. `static/app.js` works the same without it.
+- `static/fx3d.js` is the 3D form. It loads only with width >= 1024px, no reduced motion, WebGL2 and memory >= 4 GB (or unknown). Otherwise a static blurred shape shows. Add `?fx=off` to the URL to force that.
+- Three tiers: full (desktop), lite (phones and low-power: faster, transform and opacity only, no 3D), off (`prefers-reduced-motion`: nothing moves).
+- Safety: the 108 button is never animated, and a RED card with its Call 108 link is fully visible from the first frame.
+
 ## Open it on a phone (same Wi-Fi)
     python app.py --wifi        # or: SHARE_ON_WIFI=1 python app.py
 It prints the address to type on the phone, e.g. `http://192.168.1.5:5001`. The phone must be on the same Wi-Fi.

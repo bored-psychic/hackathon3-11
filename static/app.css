@@ -597,3 +597,11 @@ html.motion .tabbar a[aria-current="page"], html.motion .tabbar a[aria-current="
 html.motion .filters button { position: relative; isolation: isolate; }
 html.motion .filters button[aria-pressed="true"] { background: transparent; }
 html.motion .filters .pill { display: block; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--brand); }
+.call { position: relative; isolation: isolate; }
+.call-ring { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--red); pointer-events: none; will-change: transform, opacity; }
+
+/* phones: no blend-mode layer under the animated hero */
+@media (max-width: 1023px) {
+  .hero::after { display: none; }
+  .fx-fallback { filter: blur(24px); }
+}
