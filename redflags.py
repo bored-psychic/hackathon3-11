@@ -48,6 +48,10 @@ RED_FLAGS = {
         "paralysis", "paralysed", "paralyzed", "one side of his body", "one side of her body", "one side of my body",
         "severe burn", "severe burns", "serious burn", "serious burns", "badly burned", "badly burnt",
         "burned badly", "burnt badly",
+        # bleeding signs (dengue warning signs in Karnataka)
+        "blood in urine", "bloody urine", "hematuria", "haematuria",
+        "blood in stool", "bloody stool", "black stool", "black stools",
+        "bleeding gums", "gums bleeding", "bleeding from gums",
     ],
     "hi": [
         "सीने में दर्द", "छाती में दर्द", "सांस लेने में तकलीफ", "साँस लेने में तकलीफ", "बेहोश", "मिर्गी",
@@ -61,6 +65,7 @@ RED_FLAGS = {
         "ज़हर खा", "ज़हर पी", "ज़हर ले", "जहर खा", "जहर पी", "जहर ले",  # needs native-speaker review
         "कीटनाशक", "कीड़े मार", "कीड़ेमार", "मरना चाहती", "खुदकुशी",  # needs native-speaker review
         "खून बंद नहीं", "खून रुक नहीं", "बहना बंद नहीं",  # needs native-speaker review
+        "पेशाब में खून", "मल में खून", "मसूड़ों से खून",  # needs native-speaker review
     ],
     "kn": [
         "ಎದೆ ನೋವು", "ಉಸಿರಾಟದ ತೊಂದರೆ", "ಉಸಿರಾಡಲು ಆಗುತ್ತಿಲ್ಲ", "ಉಸಿರು ಕಟ್ಟ",
@@ -70,6 +75,7 @@ RED_FLAGS = {
         "ಎದೆನೋವು", "ಹೃದಯಾಘಾತ", "ಹಾರ್ಟ್ ಅಟ್ಯಾಕ್", "ಸ್ಟ್ರೋಕ್", "ಹಾವು ಕಡಿ", "ಹಾವಿನ ಕಡಿತ",  # needs native-speaker review
         "ಕೀಟನಾಶಕ", "ಕ್ರಿಮಿನಾಶಕ", "ಸಾಯಬೇಕು", "ಮೂರ್ಛೆ", "ರಕ್ತ ನಿಲ್ಲುತ್ತಿಲ್ಲ",  # needs native-speaker review
         "ಪ್ರಜ್ಞೆ ಇಲ್ಲ", "ಉಸಿರಾಟ ಇಲ್ಲ", "ಉಸಿರಾಡಲು ಆಗುವುದಿಲ್ಲ", "ಉಸಿರಾಡಲು ಕಷ್ಟ",  # needs native-speaker review
+        "ಮೂತ್ರದಲ್ಲಿ ರಕ್ತ", "ಮಲದಲ್ಲಿ ರಕ್ತ", "ಒಸಡಿನಿಂದ ರಕ್ತ",  # needs native-speaker review
     ],
     "ta": [
         "நெஞ்சு வலி", "மார்பு வலி", "மூச்சு விட முடியவில்லை", "மூச்சுத் திணறல்",
@@ -124,6 +130,18 @@ def normalise(text):
 
 ALL_FLAGS = list(dict.fromkeys(normalise(k) for lst in RED_FLAGS.values() for k in lst))
 _PATTERNS = [(k, re.compile(r"\b" + re.escape(k) + r"\b" if k.isascii() else re.escape(k))) for k in ALL_FLAGS]
+
+# Free word order in English, e.g. "bloody colour urine", "blood coming in my pee", "urine has blood".
+# A lab test or a blood or urine reading is not a symptom. Punctuation ends the match, so
+# "I gave blood yesterday, urine is fine" stays quiet. A negation right before the second word is a
+# denial ("urine has no blood"): the first-word case is left to _is_denied, like any keyword.
+_BLEED = r"\bblood(?:y)?\b(?!\s+(?:pressure|test|sugar|report|group|donation|donor|bank|sample|count|check))"
+_BODY = r"\b(?:urine|pee|stools?|motions?|potty)\b(?!\s+(?:test|report|sample|check|culture|routine))"
+_GAP = r"[^\w.,;!?]+"
+_NEAR = r"(?:" + _GAP + r"\w+){0,3}?" + _GAP  # up to 3 words in between
+_NOT_NEGATED = r"(?<!\bno )(?<!\bnot )(?<!\bnever )(?<!\bwithout )"
+_PATTERNS.append(("blood in urine/stool", re.compile(
+    _BLEED + _NEAR + _NOT_NEGATED + _BODY + "|" + _BODY + _NEAR + _NOT_NEGATED + _BLEED)))
 
 
 # Denial forms for ASCII (English and romanised) keywords. The negation must sit directly before the keyword.

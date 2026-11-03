@@ -260,12 +260,13 @@ class GeminiTests(ProviderTestCase):
         self.assertEqual(post.call_args.kwargs["headers"], {"x-goog-api-key": KEY})
         self.assertIn("/models/gemini-new:generateContent", post.call_args.args[0])
 
-    def test_429_waits_and_retries_once(self):
+    def test_429_goes_to_the_next_model_without_a_wait(self):
         with self.assertLogs("app", level="WARNING"):
             result, post = self.call(error(429, "slow down"), gemini())
         self.assertEqual(result, GREEN)
         self.assertEqual(post.call_count, 2)
-        self.sleep.assert_called_once_with(60)
+        self.assertNotEqual(post.call_args_list[0].args[0], post.call_args_list[1].args[0])
+        self.sleep.assert_not_called()
 
 
 class ProviderChoiceTests(ProviderTestCase):

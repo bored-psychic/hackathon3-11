@@ -62,6 +62,9 @@ class OfflineTestCase(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
         self.client = chat_app.app.test_client()
+        # the model cooldown and the Nominatim spacing outlive a request, so they must not carry between tests
+        chat_app.EXHAUSTED.clear()
+        chat_app._nominatim_next_at = 0.0
 
     def tearDown(self):
         self.assertEqual(self.network_attempts, [], "test attempted a real network call")
