@@ -1,4 +1,4 @@
-import json, os, re
+import json, os, re, time
 import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
@@ -7,7 +7,16 @@ from redflags import find_red_flag
 load_dotenv(override=True)  # .env always wins over stale shell vars
 app = Flask(__name__)
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+# Free providers only. OpenRouter has no default: choose a ":free" id with tests/list_models.py.
+OPENAI_COMPATIBLE = {
+    "groq": {"base": "https://api.groq.com/openai/v1", "model": "openai/gpt-oss-120b"},
+    "openrouter": {"base": "https://openrouter.ai/api/v1", "model": None},
+}
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_DEFAULT_MODEL = "gemini-3.8-flash"
+OPENAI_TIMEOUT_SECONDS = 20
+GEMINI_TIMEOUT_SECONDS = 25
+RATE_LIMIT_WAIT_SECONDS = 60
 LANG_NAMES = {"en": "English", "kn": "Kannada", "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "ml": "Malayalam"}
 LEVELS = ("RED", "AMBER", "GREEN")
 MAX_FOLLOW_UPS = 2
@@ -66,28 +75,120 @@ def strip_fences(text):
     return text
 
 
-def call_llm(history, message, lang, force_final=False):
-    key = os.getenv("GEMINI_API_KEY")
+class LlmConfigError(Exception):
+    """Bad or missing LLM settings. Its text is ours and holds no secret, so it is safe to log."""
+
+
+def llm_provider():
+    """LLM_PROVIDER if set, else groq. The one exception: a config holding only the old
+    GEMINI_API_KEY stays on Gemini, so an existing setup keeps working until it is moved over."""
+    provider = (os.getenv("LLM_PROVIDER") or "").strip().lower()
+    if provider:
+        return provider
+    return "gemini" if os.getenv("GEMINI_API_KEY") and not os.getenv("LLM_API_KEY") else "groq"
+
+
+def llm_api_key(provider):
+    key = os.getenv("LLM_API_KEY")
+    if not key and provider == "gemini":
+        key = os.getenv("GEMINI_API_KEY")
     if not key:
-        raise RuntimeError("GEMINI_API_KEY missing")
+        raise LlmConfigError("LLM_API_KEY missing")
+    return key
+
+
+def one_wait_poster(url, headers, timeout):
+    """Returns post(body). On HTTP 429 it waits and retries once. Only one wait per poster, so
+    one call_llm never loops and never holds the user for more than one wait."""
+    waited = False
+
+    def post(body):
+        nonlocal waited
+        r = requests.post(url, headers=headers, json=body, timeout=timeout)
+        if r.status_code == 429 and not waited:
+            waited = True
+            app.logger.warning("LLM rate limited (HTTP 429): waiting %ss, then retrying once", RATE_LIMIT_WAIT_SECONDS)
+            time.sleep(RATE_LIMIT_WAIT_SECONDS)
+            r = requests.post(url, headers=headers, json=body, timeout=timeout)
+        return r
+
+    return post
+
+
+def rejects_response_format(r):
+    """True for a 400 about JSON mode. Groq's json_validate_failed means the model broke JSON mode."""
+    if r.status_code != 400:
+        return False
+    text = r.text.lower()
+    return any(s in text for s in ("response_format", "response format", "json_object", "json_validate_failed", "json mode"))
+
+
+def call_openai_compatible(provider, key, system, history, message):
+    settings = OPENAI_COMPATIBLE[provider]
+    model = os.getenv("LLM_MODEL") or settings["model"]
+    if not model:
+        raise LlmConfigError(f"LLM_MODEL is required for {provider}")
+    messages = [{"role": "system", "content": system}]
+    for h in history[-10:]:
+        messages.append({"role": "user" if h.get("role") == "user" else "assistant", "content": h.get("text", "")})
+    messages.append({"role": "user", "content": message})
+    body = {"model": model, "messages": messages, "temperature": 0.2}
+    post = one_wait_poster(f"{settings['base']}/chat/completions", {"Authorization": f"Bearer {key}"},
+                           OPENAI_TIMEOUT_SECONDS)
+    r = post({**body, "response_format": {"type": "json_object"}})
+    if rejects_response_format(r):
+        r = post(body)  # the prompt and strip_fences still get JSON out of the reply
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"]
+
+
+def call_gemini(key, system, history, message):
     contents = []
     for h in history[-10:]:
         role = "user" if h.get("role") == "user" else "model"
         contents.append({"role": role, "parts": [{"text": h.get("text", "")}]})
     contents.append({"role": "user", "parts": [{"text": message}]})
-    system = SYSTEM_PROMPT.format(lang=LANG_NAMES[lang])
-    if force_final:
-        system += "\nYou must now return type final."
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": contents,
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
     }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
-    r = requests.post(url, params={"key": key}, json=body, timeout=25)
+    model = os.getenv("LLM_MODEL") or os.getenv("GEMINI_MODEL") or GEMINI_DEFAULT_MODEL
+    post = one_wait_poster(f"{GEMINI_BASE}/models/{model}:generateContent", {"x-goog-api-key": key},
+                           GEMINI_TIMEOUT_SECONDS)
+    r = post(body)
     r.raise_for_status()
-    text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+    return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def call_llm(history, message, lang, force_final=False):
+    provider = llm_provider()
+    if provider != "gemini" and provider not in OPENAI_COMPATIBLE:
+        raise LlmConfigError("LLM_PROVIDER must be groq, openrouter or gemini")
+    key = llm_api_key(provider)
+    system = SYSTEM_PROMPT.format(lang=LANG_NAMES[lang])
+    if force_final:
+        system += "\nYou must now return type final."
+    if provider == "gemini":
+        text = call_gemini(key, system, history, message)
+    else:
+        text = call_openai_compatible(provider, key, system, history, message)
     return json.loads(strip_fences(text))
+
+
+def scrubbed_error_text(response):
+    """The provider's own error message with any API key removed. It can quote the key
+    (Google's suspended-consumer 403 does). Scrub first, so a cut cannot leave half a key."""
+    try:
+        text = response.json().get("error", {}).get("message", "")
+    except Exception:
+        return ""
+    if not isinstance(text, str):
+        return ""
+    for key in (os.getenv("LLM_API_KEY"), os.getenv("GEMINI_API_KEY")):
+        if key:
+            text = text.replace(key, "***")
+    return text[:200]
 
 
 def as_text(value):
@@ -178,18 +279,10 @@ def chat():
     try:
         out = call_llm(history, message, lang, force_final)
     except Exception as e:
-        # never log str(e): requests errors include the URL, which contains the API key
+        # never log str(e) from anything but our own config error: a requests error carries request details
         status = getattr(getattr(e, "response", None), "status_code", None)
-        body = ""
-        try:
-            body = e.response.json().get("error", {}).get("message", "")[:200]
-        except Exception:
-            pass
-        # Google's error text can quote the key itself (e.g. a suspended-consumer 403)
-        key = os.getenv("GEMINI_API_KEY")
-        if key:
-            body = body.replace(key, "***")
-        app.logger.error("LLM failed: %s status=%s %s", type(e).__name__, status, body)
+        detail = str(e) if isinstance(e, LlmConfigError) else scrubbed_error_text(getattr(e, "response", None))
+        app.logger.error("LLM failed: %s status=%s %s", type(e).__name__, status, detail)
         return jsonify({"type": "error", "reply": ERR_MSG[lang]})
 
     result = normalize_llm(out, lang)
