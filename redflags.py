@@ -1,5 +1,7 @@
 """Hard-coded emergency check. Runs BEFORE the LLM and again on the LLM output.
-Keywords are lowercase substrings. NOTE: have native speakers review kn/hi lists."""
+Keywords are lowercase substrings (ASCII keywords match whole words only).
+NOTE: have native speakers review every non-English list."""
+import re
 
 RED_FLAGS = {
     "en": [
@@ -19,18 +21,38 @@ RED_FLAGS = {
     "kn": [
         "ಎದೆ ನೋವು", "ಉಸಿರಾಟದ ತೊಂದರೆ", "ಉಸಿರಾಡಲು ಆಗುತ್ತಿಲ್ಲ", "ಉಸಿರು ಕಟ್ಟ",
         "ಪ್ರಜ್ಞೆ ತಪ್ಪ", "ಪ್ರಜ್ಞೆಯಿಲ್ಲ", "ಫಿಟ್ಸ್", "ಅಪಸ್ಮಾರ", "ತೀವ್ರ ರಕ್ತಸ್ರಾವ",
-        "ಬಹಳ ರಕ್ತ", "ಹಾವು ಕಚ್ಚ", "ವಿಷ", "ಆತ್ಮಹತ್ಯೆ", "ಪಾರ್ಶ್ವವಾಯು",
-        "ರಕ್ತ ವಾಂತಿ",
+        "ಬಹಳ ರಕ್ತ", "ಹಾವು ಕಚ್ಚ", "ವಿಷ ಕುಡಿ", "ವಿಷ ಸೇವ", "ವಿಷಪ್ರಾಶನ", "ವಿಷ ಹಾಕ",
+        "ಆತ್ಮಹತ್ಯೆ", "ಪಾರ್ಶ್ವವಾಯು", "ರಕ್ತ ವಾಂತಿ",
+    ],
+    "ta": [
+        "நெஞ்சு வலி", "மார்பு வலி", "மூச்சு விட முடியவில்லை", "மூச்சுத் திணறல்",
+        "மயங்கி", "வலிப்பு", "அதிக ரத்தப்போக்கு", "அதிக இரத்தப்போக்கு",
+        "பாம்பு கடி", "பாம்பு கடித்த", "விஷம்", "தற்கொலை", "பக்கவாதம்",
+        "ரத்த வாந்தி", "இரத்த வாந்தி",
+    ],
+    "te": [
+        "ఛాతీ నొప్పి", "ఊపిరి ఆడ", "ఊపిరి తీసుకోలేక", "స్పృహ తప్పి", "మూర్ఛ",
+        "తీవ్ర రక్తస్రావం", "పాము కాటు", "పాము కరిచ", "విషం", "ఆత్మహత్య",
+        "పక్షవాతం", "రక్తం వాంతి",
+    ],
+    "ml": [
+        "നെഞ്ചുവേദന", "നെഞ്ച് വേദന", "ശ്വാസം മുട്ട", "ശ്വാസം എടുക്കാൻ",
+        "ബോധം പോയ", "അപസ്മാരം", "അമിത രക്തസ്രാവം", "പാമ്പ് കടി", "പാമ്പ് കടിച്ച",
+        "വിഷം", "ആത്മഹത്യ", "പക്ഷാഘാതം", "രക്തം ഛർദ്ദ",
     ],
 }
 
 ALL_FLAGS = [k for lst in RED_FLAGS.values() for k in lst]
+_ASCII_RE = {k: re.compile(r"\b" + re.escape(k) + r"\b") for k in ALL_FLAGS if k.isascii()}
 
 
 def find_red_flag(text: str):
     """Return the first matching keyword, or None. Checks all languages."""
     t = (text or "").lower().replace("’", "'")
     for kw in ALL_FLAGS:
-        if kw in t:
+        if kw in _ASCII_RE:
+            if _ASCII_RE[kw].search(t):
+                return kw
+        elif kw in t:
             return kw
     return None

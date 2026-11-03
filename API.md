@@ -4,7 +4,7 @@ Frontend lives in `templates/index.html` (+ optional `static/`). Backend owner: 
 
 ## POST /chat
 Request JSON:
-    {"message": "text", "language": "en" | "kn" | "hi", "history": [{"role": "user"|"bot", "text": "..."}]}
+    {"message": "text", "language": "en" | "kn" | "hi" | "ta" | "te" | "ml", "history": [{"role": "user"|"bot", "text": "..."}]}
 
 `history` = all earlier turns, oldest first. Frontend appends the user message AND the bot question reply to it after each turn.
 
@@ -25,4 +25,10 @@ Response JSON — 3 shapes, switch on `type`:
 
 ## Notes
 - Run locally: http://localhost:5001
-- The mic (Web Speech API) is frontend-only: set recognition.lang to en-IN / kn-IN / hi-IN, put the transcript in the message box, send it to /chat.
+- The mic (Web Speech API) is frontend-only: set recognition.lang to en-IN / kn-IN / hi-IN / ta-IN / te-IN / ml-IN, put the transcript in the message box, send it to /chat.
+
+## Scope (Karnataka only)
+The bot assumes the user is in Karnataka: advice points to 108 / 112, PHC, CHC, taluk or district government hospital.
+Languages (picker order): English, ಕನ್ನಡ (kn, default for Karnataka), हिन्दी, தமிழ், తెలుగు, മലയാളം.
+Frontend must translate its static UI text for all 6 languages and render all scripts correctly.
+It's a mobile web app: design for 360px width first; optionally add a web app manifest + theme-color so it can be "Add to Home Screen".

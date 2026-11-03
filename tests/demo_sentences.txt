@@ -9,3 +9,9 @@ AMBER | en | I have had fever for 3 days with body ache
 AMBER | hi | बच्चे को दो दिन से दस्त हो रहे हैं
 GREEN | en | I have a mild runny nose since morning
 GREEN | kn | ನನಗೆ ಸ್ವಲ್ಪ ತಲೆನೋವು ಇದೆ
+RED   | ta | எனக்கு நெஞ்சு வலி இருக்கிறது
+RED   | te | నాకు ఛాతీ నొప్పి ఉంది
+RED   | ml | അച്ഛന് നെഞ്ചുവേദന ഉണ്ട്
+AMBER | ta | மூன்று நாட்களாக காய்ச்சல் இருக்கிறது
+GREEN | te | కొంచెం తలనొప్పి ఉంది
+GREEN | ml | ചെറിയ ജലദോഷം ഉണ്ട്

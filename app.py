@@ -8,20 +8,30 @@ load_dotenv()
 app = Flask(__name__)
 
 MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-LANG_NAMES = {"en": "English", "kn": "Kannada", "hi": "Hindi"}
+LANG_NAMES = {"en": "English", "kn": "Kannada", "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "ml": "Malayalam"}
 
 RED_MSG = {
     "en": "This may be an emergency. Call 108 now or go to the nearest hospital immediately.",
     "kn": "ಇದು ತುರ್ತು ಪರಿಸ್ಥಿತಿ ಆಗಿರಬಹುದು. ಈಗಲೇ 108 ಗೆ ಕರೆ ಮಾಡಿ ಅಥವಾ ಹತ್ತಿರದ ಆಸ್ಪತ್ರೆಗೆ ಹೋಗಿ.",
     "hi": "यह आपातकाल हो सकता है। अभी 108 पर कॉल करें या नज़दीकी अस्पताल जाएँ।",
+    "ta": "இது அவசரநிலையாக இருக்கலாம். உடனே 108 ஐ அழைக்கவும் அல்லது அருகிலுள்ள மருத்துவமனைக்குச் செல்லவும்.",
+    "te": "ఇది అత్యవసర పరిస్థితి కావచ్చు. వెంటనే 108 కి కాల్ చేయండి లేదా సమీప ఆసుపత్రికి వెళ్లండి.",
+    "ml": "ഇത് അടിയന്തര സാഹചര്യമാകാം. ഉടൻ 108 ൽ വിളിക്കുക അല്ലെങ്കിൽ അടുത്തുള്ള ആശുപത്രിയിലേക്ക് പോകുക.",
 }
 ERR_MSG = {
     "en": "Sorry, something went wrong. If this is urgent, call 108.",
     "kn": "ಕ್ಷಮಿಸಿ, ಏನೋ ತಪ್ಪಾಗಿದೆ. ತುರ್ತು ಇದ್ದರೆ 108 ಗೆ ಕರೆ ಮಾಡಿ.",
     "hi": "माफ़ कीजिए, कुछ गड़बड़ हुई। अगर जरूरी है तो 108 पर कॉल करें।",
+    "ta": "மன்னிக்கவும், ஏதோ தவறு நடந்துவிட்டது. அவசரம் என்றால் 108 ஐ அழைக்கவும்.",
+    "te": "క్షమించండి, ఏదో తప్పు జరిగింది. అత్యవసరమైతే 108 కి కాల్ చేయండి.",
+    "ml": "ക്ഷമിക്കണം, എന്തോ പിശക് സംഭവിച്ചു. അടിയന്തരമാണെങ്കിൽ 108 ൽ വിളിക്കുക.",
 }
 
-SYSTEM_PROMPT = """You are a symptom triage assistant for rural India. You are NOT a doctor.
+SYSTEM_PROMPT = """You are a symptom triage assistant for people in rural Karnataka, India. You are NOT a doctor.
+Assume the user is in Karnataka. Next steps must use Karnataka's public system: ambulance 108, general emergency 112,
+nearest Primary Health Centre (PHC), Community Health Centre (CHC), taluk or district government hospital.
+Keep in mind illnesses common in Karnataka (dengue, malaria, chikungunya, diarrhoea/dehydration, heat illness, snakebite).
+Never recommend specific medicines or doses.
 Reply ONLY in {lang}. Use simple, short words.
 Each turn do exactly ONE of:
 1) Ask ONE short follow-up question (max 2 follow-ups in total), or
