@@ -66,6 +66,14 @@
   }
   var $ = function (id) { return document.getElementById(id); };
 
+  /* ---------- Optional motion layer (static/motion.js). Every call is safe if it is missing or off. ---------- */
+  function mo(name) {
+    var M = window.Motion;
+    if (!M || typeof M[name] !== 'function') return;
+    try { return M[name].apply(M, Array.prototype.slice.call(arguments, 1)); } catch (e) { return; }
+  }
+  function visibleView() { return document.querySelector('#main > .view:not([hidden]):not(.view-ghost)'); }
+
   /* ---------- Local storage (this phone only) ---------- */
   function blankStore() {
     return { lang: null, members: [], contact: { name: '', phone: '' }, checks: [], places: null, lastLoc: null };
@@ -195,7 +203,8 @@
   }
 
   /* ---------- Demo sign-in (no SMS, no server; each number keeps its own data on this phone) ---------- */
-  var login = { step: 'phone', num: '', err: '' };
+  var login = { step: 'phone', num: '', err: '', dir: 0 };
+  var loginBooted = false;
   function readSession() {
     try { var x = JSON.parse(localStorage.getItem(SESSION_KEY)); return x && /^\d{10}$/.test(x.phone) ? x.phone : null; } catch (e) { return null; }
   }
@@ -210,6 +219,7 @@
   function resetSessionState() {
     if (activeRec) activeRec.stop();
     stopSpeaking();
+    mo('clear');
     history = []; started = false; busy = false; typingRow = null;
     chat.textContent = ''; note.textContent = ''; whoSel.textContent = '';
     sendBtn.disabled = false; micBtn.disabled = false; whoSel.disabled = false;
@@ -229,7 +239,8 @@
     resetSessionState();
     phone = p;
     store = loadStore();
-    login = { step: 'phone', num: '', err: '' };
+    login = { step: 'phone', num: '', err: '', dir: 0 };
+    loginBooted = false;
     if (T[store.lang]) langSel.value = store.lang;
     applyLanguage();
     go('home');
@@ -239,6 +250,7 @@
     sessionId++;
     resetSessionState();
     phone = null;
+    loginBooted = false;
     store = loadStore(); // blank, language only
     route();
   }
@@ -279,8 +291,8 @@
       ph.addEventListener('input', function () { digitsOnly(ph); login.num = ph.value; });
       pane.appendChild(h('form', { class: 'card loginbox', onsubmit: function (e) {
         e.preventDefault();
-        if (!/^\d{10}$/.test(ph.value)) { login.err = t('badPhone'); err.textContent = login.err; ph.focus(); return; }
-        login.num = ph.value; login.step = 'code'; login.err = ''; renderLogin();
+        if (!/^\d{10}$/.test(ph.value)) { login.err = t('badPhone'); err.textContent = login.err; mo('errIn', err); mo('shake', ph.parentNode); ph.focus(); return; }
+        login.num = ph.value; login.step = 'code'; login.err = ''; login.dir = 1; renderLogin();
       } }, [
         h('h2', { text: t('loginTitle') }),
         h('p', { class: 'muted', text: t('loginSub') }),
@@ -306,11 +318,11 @@
       var wrap = h('div', { class: 'codewrap' }, [h('div', { class: 'cells', 'aria-hidden': 'true' }, cells), code]);
       pane.appendChild(h('form', { class: 'card loginbox', onsubmit: function (e) {
         e.preventDefault();
-        if (code.value !== DEMO_CODE) { err.textContent = t('badCode'); code.focus(); return; }
+        if (code.value !== DEMO_CODE) { err.textContent = t('badCode'); mo('errIn', err); mo('shake', wrap); code.focus(); return; }
         signIn(login.num);
       } }, [
         h('button', { class: 'linkbtn', type: 'button', text: '← ' + t('changeNumber'),
-          onclick: function () { login.step = 'phone'; login.err = ''; renderLogin(); } }),
+          onclick: function () { login.step = 'phone'; login.err = ''; login.dir = -1; renderLogin(); } }),
         h('h2', { text: t('codeTitle') }),
         h('p', { class: 'muted', text: t('codeSent', { num: login.num.slice(0, 5) + ' ' + login.num.slice(5) }) }),
         h('div', { class: 'field' }, [h('label', { for: 'lcode', text: t('codeLbl') }), wrap]),
@@ -320,6 +332,9 @@
       ]));
     }
     setTimeout(function () { if (first.isConnected && !first.disabled) first.focus(); }, 0);
+    var dir = login.dir; login.dir = 0;
+    var firstPaint = !loginBooted; loginBooted = true;
+    mo('login', pane, login.step, dir, firstPaint);
   }
 
   /* ---------- Router: #home | #check | #near | #family ---------- */
@@ -329,20 +344,26 @@
     return VIEWS[tab] ? tab : 'home';
   }
   function route() {
-    var tab = currentTab();
+    var tab = currentTab(), prev = visibleView(), name;
     document.body.classList.toggle('signed-out', !phone);
     updateAcct();
     $('view-login').hidden = !!phone;
     if (!phone) { // signed out: only the login view (the topbar with language + 108 is always there)
       Object.keys(VIEWS).forEach(function (k) { $('view-' + k).hidden = true; });
       renderLogin();
-      return;
+      name = 'login';
+    } else {
+      Object.keys(VIEWS).forEach(function (k) { $('view-' + k).hidden = k !== tab; });
+      document.querySelectorAll('.tabbar a').forEach(function (a) {
+        if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      });
+      VIEWS[tab]();
+      name = tab;
     }
-    Object.keys(VIEWS).forEach(function (k) { $('view-' + k).hidden = k !== tab; });
-    document.querySelectorAll('.tabbar a').forEach(function (a) {
-      if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
-    });
-    VIEWS[tab]();
+    var next = visibleView();
+    if (prev !== next) mo('transition', prev, next, name); // same view re-rendering (language, data): no choreography
+    mo('tabs');
+    mo('fx', name);
   }
   function go(tab) {
     if (currentTab() === tab) route(); else location.hash = '#' + tab;
@@ -444,6 +465,7 @@
 
     v.appendChild(helplinesBlock());
     v.appendChild(h('p', { class: 'muted small', text: t('disclaimer') }));
+    mo('fx', 'home');
   }
 
   /* =====================================================================
@@ -546,6 +568,7 @@
     var wrap = h('div', null, [b, who === 'bot' ? listenButton(text, code) : null]);
     var row = h('div', { class: 'row ' + who }, [who === 'bot' ? botAvatar() : null, wrap]);
     chat.appendChild(row);
+    mo('bubble', row, who);
     scrollDown();
     return row;
   }
@@ -554,16 +577,19 @@
     var m = member(whoSel.value);
     addBubble(m ? t('welcomeFor', { name: m.name }) : t('welcome'), 'bot');
     // One-tap common problems (helps people who find typing hard)
-    chat.appendChild(h('div', { class: 'suggest' }, [
+    var sug = h('div', { class: 'suggest' }, [
       h('div', { class: 'suggest-lbl', text: t('common') }),
       h('div', { class: 'chips' }, t('sugg').map(function (s) {
         return h('button', { class: 'chip-btn', type: 'button', text: s, onclick: function () { send(s); } });
       }))
-    ]));
+    ]);
+    chat.appendChild(sug);
+    mo('chips', sug);
   }
 
   function resetChat() {
     stopSpeaking();
+    mo('clear');
     history = [];
     started = false;
     chat.textContent = '';
@@ -578,8 +604,10 @@
       typingRow = h('div', { class: 'row bot typing' }, [botAvatar(), h('div', null, [h('div', { class: 'bubble' }, [t('typing'),
         h('span', { class: 'dots', 'aria-hidden': 'true' }, [h('span'), h('span'), h('span')])])])]);
       chat.appendChild(typingRow);
+      mo('typing', typingRow, true);
       scrollDown();
     } else if (!on && typingRow) {
+      mo('typing', typingRow, false);
       typingRow.remove();
       typingRow = null;
     }
@@ -705,6 +733,7 @@
     if (m) card.appendChild(h('div', { class: 'saved', text: t('savedTo', { name: m.name }, code) }));
     chat.appendChild(card);
     chat.appendChild(h('button', { class: 'btn block', type: 'button', style: 'margin:4px 0 12px', onclick: resetChat }, [t('newCheck', null, code)]));
+    mo('result', card, level);
     scrollDown();
   }
 
@@ -996,6 +1025,8 @@
     } else if (near.status === 'idle') {
       v.appendChild(h('p', { class: 'muted small', text: t('nearNote') }));
     }
+    var sig = near.filter + '|' + near.spec + '|' + (P && P.at);
+    if (P && P.list && sig !== near.sig) { near.sig = sig; mo('list', v.querySelectorAll('.place'), 'near'); }
     v.appendChild(helplinesBlock());
   }
 
@@ -1012,7 +1043,11 @@
   function renderFamily() {
     var v = $('view-family');
     v.textContent = '';
-    if (fam.editing !== undefined) { v.appendChild(memberForm(fam.editing === null ? null : member(fam.editing))); v.scrollTop = 0; return; }
+    if (fam.editing !== undefined) {
+      var form = memberForm(fam.editing === null ? null : member(fam.editing));
+      v.appendChild(form); v.scrollTop = 0; mo('expand', form);
+      return;
+    }
 
     v.appendChild(h('h2', { text: t('navFamily') }));
     v.appendChild(h('p', { class: 'muted small', text: t('pfPrivacy') }));
@@ -1050,11 +1085,15 @@
         h('div', { class: 'row-actions' }, [
           h('button', { class: 'btn primary', type: 'button', onclick: function () { startCheckFor(m.id); } }, [icon('chat'), t('navCheck')]),
           h('button', { class: 'btn', type: 'button', onclick: function () { editMember(m.id); } }, [icon('edit'), t('edit')]),
-          h('button', { class: 'btn danger', type: 'button', onclick: function () {
+          h('button', { class: 'btn danger', type: 'button', onclick: function (ev) {
             if (!confirming) { fam.confirm = m.id; renderFamily(); return; }
-            store.members = store.members.filter(function (x) { return x.id !== m.id; });
-            store.checks = store.checks.filter(function (c) { return c.memberId !== m.id; });
-            fam.confirm = null; save(); renderFamily();
+            var card = ev.currentTarget.closest('.card');
+            var finish = function () {
+              store.members = store.members.filter(function (x) { return x.id !== m.id; });
+              store.checks = store.checks.filter(function (c) { return c.memberId !== m.id; });
+              fam.confirm = null; save(); renderFamily();
+            };
+            if (!mo('collapse', card, finish)) finish();
           } }, [confirming ? t('confirmDel') : t('del')])
         ])
       ]));
@@ -1141,6 +1180,7 @@
     stopSpeaking();
     applyLanguage();
     route();               // re-render the visible view in the new language
+    mo('crossfade', visibleView());
     refreshListenButtons();
   });
   applyLanguage();
