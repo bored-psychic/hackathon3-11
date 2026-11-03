@@ -1,4 +1,4 @@
-import json, os
+import json, os, re
 import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
@@ -9,6 +9,7 @@ app = Flask(__name__)
 
 MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 LANG_NAMES = {"en": "English", "kn": "Kannada", "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "ml": "Malayalam"}
+LEVELS = ("RED", "AMBER", "GREEN")
 
 RED_MSG = {
     "en": "This may be an emergency. Call 108 now or go to the nearest hospital immediately.",
@@ -45,6 +46,15 @@ Output STRICT JSON only:
 "symptoms_en":["<each symptom the user has, in English>"]}}"""
 
 
+def strip_fences(text):
+    """Remove a ```json ... ``` wrapper, if the whole reply is wrapped in one."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[A-Za-z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return text
+
+
 def call_llm(history, message, lang):
     key = os.getenv("GEMINI_API_KEY")
     if not key:
@@ -63,7 +73,50 @@ def call_llm(history, message, lang):
     r = requests.post(url, params={"key": key}, json=body, timeout=25)
     r.raise_for_status()
     text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-    return json.loads(text)
+    return json.loads(strip_fences(text))
+
+
+def as_text(value):
+    """Return a string, or "" for anything else. A list of strings is joined, because
+    the prompt asks for "1-3 short steps" and models often send those as a list."""
+    if isinstance(value, list):
+        value = " ".join(v for v in value if isinstance(v, str))
+    return value.strip() if isinstance(value, str) else ""
+
+
+def normalize_llm(out, lang):
+    """Force any LLM result into one of the 3 response shapes in API.md."""
+    error = {"type": "error", "reply": ERR_MSG[lang]}
+    if not isinstance(out, dict):
+        return error
+
+    reply = out.get("reply")
+    reply = reply.strip() if isinstance(reply, str) else ""
+    level = out.get("level")
+    level = level.strip().upper() if isinstance(level, str) else ""
+    symptoms = out.get("symptoms_en")
+    if not (isinstance(symptoms, list) and all(isinstance(s, str) for s in symptoms)):
+        symptoms = []
+
+    kind = out.get("type")
+    if kind not in ("question", "final"):
+        kind = "final" if level in LEVELS else "question" if reply else "error"
+
+    if kind == "final":
+        return {"type": "final", "level": level if level in LEVELS else "AMBER", "reply": reply,
+                "reason": as_text(out.get("reason")), "advice": as_text(out.get("advice")),
+                "symptoms_en": symptoms}
+    if kind == "question" and reply:
+        return {"type": "question", "reply": reply, "level": None, "symptoms_en": symptoms}
+    return error
+
+
+def raw_symptom_text(out):
+    """All symptom text in the raw LLM result, however malformed. The safety override reads
+    this, not the normalised copy, so a broken reply can never hide a red-flag symptom."""
+    if not isinstance(out, dict):
+        return ""
+    return as_text(out.get("symptoms_en"))
 
 
 def red_response(lang, kw):
@@ -106,11 +159,13 @@ def chat():
         app.logger.error("LLM failed: %s status=%s %s", type(e).__name__, status, body)
         return jsonify({"type": "error", "reply": ERR_MSG[lang]})
 
-    # Step 5: safety override on LLM's English symptom list
-    kw = find_red_flag(" ".join(out.get("symptoms_en") or []))
-    if kw and out.get("level") != "RED":
+    result = normalize_llm(out, lang)
+
+    # Step 5: safety override on LLM's English symptom list, for every result type
+    kw = find_red_flag(raw_symptom_text(out))
+    if kw and result.get("level") != "RED":
         return jsonify(red_response(lang, kw))
-    return jsonify(out)
+    return jsonify(result)
 
 
 if __name__ == "__main__":
