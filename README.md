@@ -20,4 +20,4 @@ When a provider fails, `/chat` still answers within 35 seconds, in the user's la
 - After a 429 only: if Gemini also fails or is not set, the app waits 3 seconds and tries the chosen provider once more.
 - If all of that fails, or 35 seconds run out, the user gets the error reply. The log names the provider that answered and nothing else about it.
 
-Messages over 1000 characters return HTTP 400 `{"error":"too_long"}`, unless they contain a red flag, which still returns RED.
+Messages over 1000 characters return HTTP 400 `{"error":"too_long"}`, and malformed requests return HTTP 400 `{"error":"bad_request"}`, unless the message contains a red flag, which still returns RED.

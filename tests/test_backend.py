@@ -26,8 +26,8 @@ def post(client, message, language="en", history=None):
 class RedFlagTests(OfflineTestCase):
     def test_hits(self):
         for t in ["My father has chest pain", "having fever rashes and bloody colour urine",
-                  "urine has blood", "bleeding gums and fever", "पेशाब में खून आ रहा है",
-                  "ಮೂತ್ರದಲ್ಲಿ ರಕ್ತ ಬರುತ್ತಿದೆ", "मेरी माँ को सीने में दर्द हो रहा है"]:
+                  "urine has blood", "bleeding gums and fever", "पेशाब में खून आ रहा है",  # needs native-speaker review
+                  "ಮೂತ್ರದಲ್ಲಿ ರಕ್ತ ಬರುತ್ತಿದೆ", "मेरी माँ को सीने में दर्द हो रहा है"]:  # needs native-speaker review
             self.assertIsNotNone(find_red_flag(t), t)
 
     def test_no_false_positives(self):
@@ -75,7 +75,7 @@ class ChatTests(OfflineTestCase):
         fake = {"type": "final", "level": "GREEN", "reply": "ok", "reason": "r", "advice": "a",
                 "symptoms_en": ["blood in urine", "fever"]}
         with mock.patch.object(backend, "call_llm", return_value=fake):
-            o = post(self.c, "ಜ್ವರ ಮತ್ತು ಕೆಂಪು ಮೂತ್ರ", "kn").get_json()
+            o = post(self.c, "ಜ್ವರ ಮತ್ತು ಕೆಂಪು ಮೂತ್ರ", "kn").get_json()  # needs native-speaker review
         self.assertEqual(o["level"], "RED")
         self.assertEqual(o["reply"], backend.RED_MSG["kn"])
 
@@ -91,11 +91,17 @@ class ChatTests(OfflineTestCase):
             o = post(self.c, "I feel tired", "ta").get_json()
         self.assertEqual(o, {"type": "error", "reply": backend.ERR_MSG["ta"]})
 
-    def test_unknown_language_is_tolerated(self):
+    def test_malformed_history_is_400_while_unknown_language_and_role_are_tolerated(self):
         fake = {"type": "question", "reply": "?", "level": None}
         with mock.patch.object(backend, "call_llm", return_value=fake) as llm:
-            r = self.c.post("/chat", json={"message": "hi", "language": "xx"})
+            r = self.c.post("/chat", json={"message": "hi", "language": "xx", "history": "oops"})
+            self.assertEqual(r.status_code, 400)
+            r = self.c.post("/chat", json={"message": "hi", "history": [1, None, {"role": "x"}, {"role": "user", "text": "a"}]})
+            self.assertEqual(r.status_code, 400)
+            llm.assert_not_called()
+            r = self.c.post("/chat", json={"message": "hi", "language": "xx", "history": [{"role": "x"}, {"role": "user", "text": "a"}]})
             self.assertEqual(r.status_code, 200)
+        self.assertEqual(llm.call_args.args[0], [{"role": "user", "text": "a"}])
         self.assertEqual(llm.call_args.args[2], "en")
 
     def test_non_json_body(self):
@@ -227,7 +233,7 @@ class PlacesTests(OfflineTestCase):
 class BleedingFlagTests(OfflineTestCase):
     NEW_KEYWORDS = ("blood in urine", "bloody urine", "hematuria", "haematuria", "blood in stool", "bloody stool",
                     "black stool", "black stools", "bleeding gums", "gums bleeding", "bleeding from gums",
-                    "पेशाब में खून", "मल में खून", "मसूड़ों से खून", "ಮೂತ್ರದಲ್ಲಿ ರಕ್ತ", "ಮಲದಲ್ಲಿ ರಕ್ತ", "ಒಸಡಿನಿಂದ ರಕ್ತ")
+                    "पेशाब में खून", "मल में खून", "मसूड़ों से खून", "ಮೂತ್ರದಲ್ಲಿ ರಕ್ತ", "ಮಲದಲ್ಲಿ ರಕ್ತ", "ಒಸಡಿನಿಂದ ರಕ್ತ")  # needs native-speaker review
     WORD_ORDER = ("blood coming in my pee", "bloody colour urine", "urine has blood", "my stool has blood",
                   "loose motions with blood", "blood while passing urine", "potty with blood")
     NOT_RED = ("blood test report", "blood pressure check", "blood sugar 140", "I gave blood yesterday, urine is fine",

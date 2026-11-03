@@ -154,9 +154,10 @@ _LOOKBEHIND_CHARS = 32  # longer than the longest form, "does not have any "
 # Denial words for hi/kn/ta/te/ml keywords. A whole token only: "ಗೊತ್ತಿಲ್ಲ" ends in "ಇಲ್ಲ" but is not one.
 _NEGATION_AFTER = frozenset(normalise(w) for w in ("नहीं", "नही", "ಇಲ್ಲ", "இல்லை", "లేదు", "ഇല്ല"))
 _NOT_IN_TOKEN = r"\s.,;:!?।॥|()\[\]{}\"…"
-# Skips the rest of the current word, since a keyword can be a stem, then captures up to 2 tokens.
+# Skips the rest of the current word, since a keyword can be a stem, then captures the next token. Only that
+# one: with a wider window, a snakebite followed by "no pain" would read as a denial of the snakebite.
 # Punctuation ends the match, so a denial word after punctuation is never reached.
-_NEXT_TWO_TOKENS = re.compile(rf"[^{_NOT_IN_TOKEN}]*(?:\s+([^{_NOT_IN_TOKEN}]+))?(?:\s+([^{_NOT_IN_TOKEN}]+))?")
+_NEXT_TOKEN = re.compile(rf"[^{_NOT_IN_TOKEN}]*(?:\s+([^{_NOT_IN_TOKEN}]+))?")
 
 # Normalising turns these into plain spaces, which erases a break between two statements.
 _ERASED_BREAK = re.compile(r"\s+[-_]+\s*|[-_]+\s+|\s*[\u2010-\u2014\u2212]+\s*|[\r\n]+")
@@ -167,7 +168,7 @@ def _is_denied(text, match):
     contains a negation ("not breathing", "सांस नहीं आ") is never denied by its own words."""
     if match.group().isascii():
         return bool(_NEGATION_BEFORE.search(text, max(0, match.start() - _LOOKBEHIND_CHARS), match.start()))
-    return not _NEGATION_AFTER.isdisjoint(_NEXT_TWO_TOKENS.match(text, match.end()).groups())
+    return _NEXT_TOKEN.match(text, match.end()).group(1) in _NEGATION_AFTER
 
 
 def _scan(text):

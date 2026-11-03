@@ -66,6 +66,7 @@ Assume the user is in Karnataka. Next steps must use Karnataka's public system: 
 nearest Primary Health Centre (PHC), Community Health Centre (CHC), taluk or district government hospital.
 Keep in mind illnesses common in Karnataka (dengue, malaria, chikungunya, diarrhoea/dehydration, heat illness, snakebite).
 Never recommend specific medicines or doses.
+The one exception: for dehydration or diarrhoea you may advise ORS (oral rehydration solution) and drinking fluids.
 Reply ONLY in {lang}. Use simple, short words.
 Each turn do exactly ONE of:
 1) Ask ONE short follow-up question (max 2 follow-ups in total), or
@@ -385,9 +386,13 @@ def normalize_llm(out, lang):
     if kind == "question" and level == "RED":
         return red_response(lang)  # the model says emergency: do not make the user answer a question first
     if kind == "final":
-        return {"type": "final", "level": level if level in LEVELS else "AMBER", "reply": reply,
-                "reason": as_text(out.get("reason")), "advice": as_text(out.get("advice")),
-                "symptoms_en": symptoms}
+        final = {"type": "final", "level": level if level in LEVELS else "AMBER", "reply": reply,
+                 "reason": as_text(out.get("reason")), "advice": as_text(out.get("advice")),
+                 "symptoms_en": symptoms}
+        if final["level"] == "RED":  # an emergency card must never show up blank
+            for field in ("reply", "reason", "advice"):
+                final[field] = final[field] or RED_MSG[lang]
+        return final
     if kind == "question" and reply:
         return {"type": "question", "reply": reply, "level": None, "symptoms_en": symptoms}
     return error
@@ -425,28 +430,62 @@ def index():
     return render_template("index.html")
 
 
+def json_body():
+    """The parsed JSON body, or None if it cannot be parsed. Flask's silent=True does not cover JSON nested
+    too deeply for the parser."""
+    try:
+        return request.get_json(silent=True)
+    except RecursionError:
+        return None
+
+
+def parse_history(raw):
+    """Clean {role, text} turns, or None if the client sent something malformed. text null counts as empty.
+    A turn with any other role is dropped: only user turns are scanned and only bot turns count as follow-ups."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        return None
+    turns = []
+    for turn in raw:
+        if not isinstance(turn, dict):
+            return None
+        text = turn.get("text")
+        if not (text is None or isinstance(text, str)):
+            return None
+        if turn.get("role") in ("user", "bot"):
+            turns.append({"role": turn["role"], "text": text or ""})
+    return turns
+
+
 @app.post("/chat")
 def chat():
-    data = request.get_json(silent=True) or {}
+    data = json_body()
+    data = {} if data is None else data
+    if not isinstance(data, dict) or not isinstance(data.get("message"), (str, type(None))):
+        return jsonify({"error": "bad_request"}), 400
     message = (data.get("message") or "").strip()
     lang = data.get("language", "en")
-    lang = lang if lang in LANG_NAMES else "en"
-    history = data.get("history") or []
+    lang_is_valid = isinstance(lang, (str, type(None)))
+    lang = lang if lang_is_valid and lang in LANG_NAMES else "en"
+    history = parse_history(data.get("history"))
     if not message:
         return jsonify({"error": "empty"}), 400
 
     # Step 3: red-flag scan on this message + earlier user turns, no LLM
-    user_text = " . ".join([h.get("text", "") for h in history if h.get("role") == "user"] + [message])
+    user_text = " . ".join([h["text"] for h in history or [] if h["role"] == "user"] + [message])
     kw = find_red_flag(user_text)
     if kw:
         return jsonify(red_response(lang, kw))
 
-    # Checked after the red-flag scan on purpose: a long message about an emergency is still RED
+    # Checked after the red-flag scan on purpose: a malformed or long message about an emergency is still RED
+    if history is None or not lang_is_valid:
+        return jsonify({"error": "bad_request"}), 400
     if len(message) > MAX_MESSAGE_CHARS:
         return jsonify({"error": "too_long"}), 400
 
     # Step 4: LLM
-    force_final = sum(1 for h in history if h.get("role") == "bot") >= MAX_FOLLOW_UPS
+    force_final = sum(1 for h in history if h["role"] == "bot") >= MAX_FOLLOW_UPS
     profile = profile_summary(data.get("profile"))
     try:
         out = run_with_deadline(lambda: call_llm(history, message, lang, force_final=force_final, profile=profile),

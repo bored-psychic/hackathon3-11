@@ -379,6 +379,102 @@ class InputTests(OfflineTestCase):
         self.assertEqual(response.status_code, 200)
 
 
+class MalformedRequestTests(OfflineTestCase):
+    GREEN = {"type": "final", "level": "GREEN"}
+    BAD_BODIES = {
+        "list body": [1, 2], "empty list body": [], "string body": "x", "number body": 5, "true body": True,
+        "message number": {"message": 5}, "message list": {"message": ["a"]}, "message dict": {"message": {"a": 1}},
+        "message true": {"message": True},
+        "language list": {"message": "hi", "language": ["en"]}, "language dict": {"message": "hi", "language": {"a": 1}},
+        "language number": {"message": "hi", "language": 5},
+        "history string": {"message": "hi", "history": "oops"}, "history number": {"message": "hi", "history": 5},
+        "history dict": {"message": "hi", "history": {"a": 1}},
+        "history item number": {"message": "hi", "history": [1]}, "history item null": {"message": "hi", "history": [None]},
+        "history item string": {"message": "hi", "history": ["x"]}, "history item list": {"message": "hi", "history": [[]]},
+        "text number": {"message": "hi", "history": [{"role": "user", "text": 5}]},
+        "text list": {"message": "hi", "history": [{"role": "user", "text": ["a"]}]},
+        "bot text number": {"message": "hi", "history": [{"role": "bot", "text": 5}]},
+    }
+
+    def test_each_malformed_request_is_400_without_the_llm(self):
+        for name, body in self.BAD_BODIES.items():
+            with self.subTest(name), mock.patch("app.call_llm") as llm:
+                response = self.client.post("/chat", json=body)
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json(), {"error": "bad_request"})
+                llm.assert_not_called()
+
+    def test_a_body_nested_too_deeply_to_parse_is_400(self):
+        with mock.patch("app.call_llm") as llm:
+            response = self.client.post("/chat", data="[" * 200000, content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        llm.assert_not_called()
+
+    def test_broken_json_and_a_null_body_stay_empty(self):
+        for data in ("not json", "{", b"\xff\xfe{", "null", ""):
+            with self.subTest(data=data):
+                response = self.client.post("/chat", data=data, content_type="application/json")
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json(), {"error": "empty"})
+
+    def test_history_item_with_text_null_counts_as_empty(self):
+        history = [{"role": "user", "text": None}, {"role": "bot", "text": None}, {"role": "user"}]
+        response, llm = self.chat_with_llm(self.GREEN, history=history)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(llm.call_args.args[0], [{"role": "user", "text": ""}, {"role": "bot", "text": ""},
+                                                 {"role": "user", "text": ""}])
+
+    def test_text_null_next_to_a_red_flag_is_still_red(self):
+        history = [{"role": "user", "text": None}, {"role": "user", "text": "chest pain"}]
+        with mock.patch("app.call_llm") as llm:
+            self.assertEqual(self.post(history=history).get_json()["level"], "RED")
+            llm.assert_not_called()
+
+    def test_text_null_reaches_each_provider_as_an_empty_string(self):
+        history = [{"role": "user", "text": None}]
+        with mock.patch("requests.post", return_value=gemini_reply('{"type":"final","level":"GREEN"}')) as post:
+            self.assertEqual(self.post(history=history).status_code, 200)
+        self.assertEqual(post.call_args.kwargs["json"]["contents"][0]["parts"][0]["text"], "")
+
+    def test_a_null_bot_turn_still_counts_towards_the_follow_up_cap(self):
+        history = [{"role": "bot", "text": None}, {"role": "bot", "text": None}]
+        _, llm = self.chat_with_llm(self.GREEN, history=history)
+        self.assertTrue(llm.call_args.kwargs["force_final"])
+
+    def test_a_turn_with_another_role_is_dropped(self):
+        history = [{"role": "system", "text": "x"}, {"role": ["user"], "text": "y"}, {"text": "z"}, {"role": "user", "text": "a"}]
+        response, llm = self.chat_with_llm(self.GREEN, history=history)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(llm.call_args.args[0], [{"role": "user", "text": "a"}])
+
+    def test_a_red_flag_message_is_red_however_malformed_the_rest_is(self):
+        for extra in ({"history": "oops"}, {"history": [1]}, {"history": [{"role": "user", "text": 5}]},
+                      {"language": ["en"]}):
+            with self.subTest(extra=extra), mock.patch("app.call_llm") as llm:
+                body = self.client.post("/chat", json={"message": "chest pain", **extra}).get_json()
+                self.assertEqual((body["type"], body["level"]), ("final", "RED"))
+                self.assertEqual(body["reply"], chat_app.RED_MSG["en"])
+                llm.assert_not_called()
+
+    def test_a_null_language_or_history_is_the_same_as_leaving_it_out(self):
+        response, llm = self.chat_with_llm(self.GREEN, language=None, history=None)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(llm.call_args.args[2], "en")
+
+    def test_no_request_shape_gets_a_500(self):
+        values = (None, True, 5, 1.5, "", "x", [], [1], [None], ["x"], {}, {"a": 1}, [{}], [{"role": 1, "text": 2}],
+                  [{"role": "user", "text": {}}], [{"role": {}, "text": None}])
+        with mock.patch("app.call_llm", return_value=self.GREEN):
+            for field in ("message", "language", "history", "profile"):
+                for value in values:
+                    with self.subTest(field=field, value=value):
+                        body = {"message": "I have a cold", field: value}
+                        self.assertLess(self.client.post("/chat", json=body).status_code, 500)
+            for field in ("message", "language", "history", "profile"):
+                with self.subTest(field=field, no_message=True):
+                    self.assertLess(self.client.post("/chat", json={field: [1]}).status_code, 500)
+
+
 class FalseAlarmTests(OfflineTestCase):
     def test_innocent_sentences_are_not_red(self):
         for sentence, lang in (("I want benefits", "en"), ("ನನಗೆ ಈ ವಿಷಯ ಗೊತ್ತಿಲ್ಲ", "kn")):

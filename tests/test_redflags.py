@@ -71,6 +71,16 @@ NATURAL_PHRASINGS = [
 ]
 
 
+# Each negates another word right after the emergency. A 2-token denial window used to hide all five.
+EMERGENCY_THEN_OTHER_DENIAL = [
+    "सांप ने काटा दर्द नहीं",  # needs native-speaker review
+    "बच्चा बेहोश सांस नहीं",  # needs native-speaker review
+    "ಹಾವು ಕಡಿದಿದೆ ನೋವು ಇಲ್ಲ",  # needs native-speaker review
+    "பாம்பு கடித்த வலி இல்லை",  # needs native-speaker review
+    "పాము కరిచింది నొప్పి లేదు",  # needs native-speaker review
+]
+
+
 def demo_rows():
     with open(os.path.join(REPO_ROOT, "tests", "demo_sentences.txt"), encoding="utf-8") as f:
         rows = [line.split("|", 2) for line in f if line.strip() and not line.startswith("#")]
@@ -143,6 +153,20 @@ class CoverageTests(OfflineTestCase):
                 with self.subTest(lang=lang, keyword=keyword):
                     self.assertIn(keyword, RED_FLAGS[lang])
                     self.assertEqual(find_red_flag(keyword), normalise(keyword))
+
+
+class HiddenEmergencyTests(OfflineTestCase):
+    def test_the_five_hidden_emergencies_are_red(self):
+        for phrase in EMERGENCY_THEN_OTHER_DENIAL:
+            with self.subTest(phrase=phrase):
+                self.assertTrue(find_red_flag(phrase))
+
+    def test_the_five_hidden_emergencies_are_red_through_chat_without_the_llm(self):
+        for phrase in EMERGENCY_THEN_OTHER_DENIAL:
+            with self.subTest(phrase=phrase), mock.patch("app.call_llm") as llm:
+                body = self.post(phrase).get_json()
+                self.assertEqual((body["type"], body["level"]), ("final", "RED"))
+                llm.assert_not_called()
 
 
 class NormaliseTests(OfflineTestCase):
@@ -248,14 +272,16 @@ class DenialGuardTests(OfflineTestCase):
                         "மூச்சு விட முடியவில்லை", "ಉಸಿರಾಡಲು ಆಗುತ್ತಿಲ್ಲ", "ಪ್ರಜ್ಞೆಯಿಲ್ಲ")
 
     def test_keyword_containing_a_negation_can_be_denied_from_outside(self):
-        self.assert_not_red("no not breathing", "सांस नहीं आ रही नहीं")
+        self.assert_not_red("no not breathing", "सांस नहीं आ नहीं")  # needs native-speaker review
+        self.assert_red("सांस नहीं आ रही नहीं")  # the negation is 2 tokens after. needs native-speaker review
 
     def test_each_indian_language_negation_denies(self):
         self.assert_not_red("सीने में दर्द नहीं", "सीने में दर्द नही", "ಎದೆ ನೋವು ಇಲ್ಲ", "நெஞ்சு வலி இல்லை",
                             "ఛాతీ నొప్పి లేదు", "നെഞ്ചുവേദന ഇല്ല")
 
-    def test_negation_up_to_two_tokens_after_denies(self):
-        self.assert_not_red("सीने में दर्द बिल्कुल नहीं", "सीने में दर्द बिल्कुल नहीं है")  # needs native-speaker review
+    def test_negation_must_be_the_very_next_token(self):
+        self.assert_not_red("सीने में दर्द नहीं", "सीने में दर्द नहीं है")  # needs native-speaker review
+        self.assert_red("सीने में दर्द बिल्कुल नहीं", "सीने में दर्द बिल्कुल नहीं है")  # needs native-speaker review
 
     def test_negation_three_tokens_after_stays_red(self):
         self.assert_red("सीने में दर्द है अभी नहीं")  # needs native-speaker review

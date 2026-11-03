@@ -194,11 +194,12 @@ class NoGeminiKeyTests(FallbackTestCase):
 
     def test_no_gemini_call_on_any_failure(self):
         for failure in (error(500, "x"), error(401, "x"), requests.Timeout(), requests.ConnectionError()):
-            with self.subTest(failure=failure), self.assertLogs("app", level="ERROR"):
+            with self.subTest(failure=failure), self.assertLogs("app", level="WARNING") as logs:
                 route = Route(groq=[failure])
                 self.assertEqual(self.chat(route).get_json(), ERROR_REPLY)
                 self.assertEqual(route.calls["gemini"], [])
                 self.assertEqual(len(route.calls["groq"]), 1)
+                self.assertNotIn("gemini", "\n".join(logs.output))  # it is not even attempted
         self.sleep.assert_not_called()
 
     def test_429_waits_3_seconds_and_tries_groq_once_more(self):

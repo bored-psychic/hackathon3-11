@@ -67,6 +67,76 @@ class RedResponseTests(OfflineTestCase):
         self.assertEqual(set(chat_app.red_response("en")), FINAL_KEYS)
 
 
+class EmptyRedFillTests(OfflineTestCase):
+    def test_final_red_with_nothing_is_filled_in_every_language(self):
+        for lang in LANGS:
+            with self.subTest(lang=lang):
+                body = self.chat_with_llm({"type": "final", "level": "RED"}, language=lang)[0].get_json()
+                message = chat_app.RED_MSG[lang]
+                self.assertEqual((body["reply"], body["reason"], body["advice"]), (message, message, message))
+
+    def test_each_empty_field_is_filled_on_its_own(self):
+        message = chat_app.RED_MSG["en"]
+        for field in ("reply", "reason", "advice"):
+            for empty in ("", "   ", None, 5, [], [5]):
+                with self.subTest(field=field, empty=empty):
+                    llm_result = {"type": "final", "level": "RED", "reply": "r", "reason": "why", "advice": "go", field: empty}
+                    body = self.chat_with_llm(llm_result)[0].get_json()
+                    expected = {"reply": "r", "reason": "why", "advice": "go", field: message}
+                    self.assertEqual({k: body[k] for k in expected}, expected)
+
+    def test_red_text_from_the_model_is_kept(self):
+        llm_result = {"type": "final", "level": "RED", "reply": "r", "reason": "why", "advice": "go"}
+        body = self.chat_with_llm(llm_result)[0].get_json()
+        self.assertEqual((body["reply"], body["reason"], body["advice"]), ("r", "why", "go"))
+
+    def test_lowercase_red_with_an_unknown_type_is_filled(self):
+        body = self.chat_with_llm({"type": "triage", "level": "red"})[0].get_json()
+        self.assertEqual((body["type"], body["level"], body["reply"]), ("final", "RED", chat_app.RED_MSG["en"]))
+
+    def test_the_shape_stays_the_api_md_final_shape(self):
+        self.assertEqual(set(self.chat_with_llm({"type": "final", "level": "RED"})[0].get_json()), FINAL_KEYS)
+
+    def test_green_and_amber_are_not_filled(self):
+        for level in ("GREEN", "AMBER"):
+            with self.subTest(level=level):
+                body = self.chat_with_llm({"type": "final", "level": level})[0].get_json()
+                self.assertEqual((body["reply"], body["reason"], body["advice"]), ("", "", ""))
+
+    def test_the_hard_coded_red_keeps_showing_the_message_once(self):
+        with mock.patch("app.call_llm") as llm:
+            body = self.post("chest pain").get_json()
+            llm.assert_not_called()
+        self.assertEqual(body["advice"], "")
+        self.assertEqual(body["reason"], chat_app.RED_MSG["en"])
+
+
+class PromptRuleTests(OfflineTestCase):
+    def test_ors_and_fluids_are_allowed_for_dehydration_and_diarrhoea_only(self):
+        prompt = chat_app.SYSTEM_PROMPT
+        self.assertIn("for dehydration or diarrhoea you may advise ORS (oral rehydration solution) and drinking fluids",
+                      prompt)
+        self.assertIn("Never recommend specific medicines or doses", prompt)
+        self.assertIn("choose the more serious", prompt)
+
+    def test_the_ors_line_adds_exactly_one_line_after_the_medicine_rule(self):
+        lines = chat_app.SYSTEM_PROMPT.splitlines()
+        rule = lines.index("Never recommend specific medicines or doses.")
+        self.assertTrue(lines[rule + 1].startswith("The one exception:"))
+        self.assertEqual(sum("ORS" in line for line in lines), 1)
+
+    def test_the_prompt_names_no_other_medicine(self):
+        prompt = chat_app.SYSTEM_PROMPT.lower()
+        for name in ("paracetamol", "ibuprofen", "aspirin", "antibiotic", "crocin", "dolo", "metformin", " mg", " ml"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, prompt)
+
+    def test_the_prompt_still_formats_for_every_language(self):
+        for lang, name in chat_app.LANG_NAMES.items():
+            with self.subTest(lang=lang):
+                self.assertIn(f"Reply ONLY in {name}", chat_app.SYSTEM_PROMPT.format(lang=name))
+
+
 class DebugSettingTests(OfflineTestCase):
     def test_debug_values(self):
         for value, expected in (("1", True), ("true", True), ("TRUE", True), (" yes ", True), ("on", True),
@@ -101,6 +171,23 @@ class DocTests(OfflineTestCase):
         for language in ("English", "Kannada", "Hindi", "Tamil", "Telugu", "Malayalam"):
             with self.subTest(language=language):
                 self.assertIn(language, first_line)
+
+    def test_api_md_has_the_web_app_additions(self):
+        text = read_doc("API.md")
+        for part in ('"profile": {"age": 64', "never names or phone numbers", "## GET /places?lat=12.52&lon=76.89",
+                     '"radius_km": 13, "source": "OpenStreetMap"', "max 25 per kind", '{"error": "bad location"}',
+                     "## GET /geocode?q=Pandavapura&lang=kn", '{"results": [{"name":', "localStorage",
+                     "the backend keeps no user data"):
+            with self.subTest(part=part):
+                self.assertIn(part, text)
+
+    def test_api_md_keeps_the_three_chat_response_shapes(self):
+        text = read_doc("API.md")
+        for part in ('{"type": "question", "reply": "text in user\'s language", "level": null, "symptoms_en": [...]}',
+                     '{"type": "final", "level": "RED" | "AMBER" | "GREEN", "reply": "...", "reason": "...", "advice": "...", "symptoms_en": [...]}',
+                     '{"type": "error", "reply": "text in user\'s language"}', '"matched": "<keyword>"'):
+            with self.subTest(part=part):
+                self.assertIn(part, text)
 
     def test_api_md_has_the_frontend_notes(self):
         text = read_doc("API.md")
