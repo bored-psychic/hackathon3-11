@@ -160,7 +160,7 @@ def chat():
         return jsonify({"error": "empty"}), 400
 
     # Step 3: red-flag scan on this message + earlier user turns, no LLM
-    user_text = " ".join([h.get("text", "") for h in history if h.get("role") == "user"] + [message])
+    user_text = " . ".join([h.get("text", "") for h in history if h.get("role") == "user"] + [message])
     kw = find_red_flag(user_text)
     if kw:
         return jsonify(red_response(lang, kw))
