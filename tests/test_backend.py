@@ -39,6 +39,7 @@ class ChatTests(unittest.TestCase):
             o = post(self.c, "My father has chest pain").get_json()
         llm.assert_not_called()
         self.assertEqual((o["type"], o["level"]), ("final", "RED"))
+        self.assertEqual((o["specialty"], o["facility"]), ("emergency", "district_hospital"))
 
     def test_red_flag_in_history(self):
         with mock.patch.object(backend, "call_llm") as llm:
@@ -51,7 +52,23 @@ class ChatTests(unittest.TestCase):
         fake = {"type": "question", "reply": "How many days?", "level": None, "symptoms_en": ["fever"]}
         with mock.patch.object(backend, "call_llm", return_value=fake):
             o = post(self.c, "I have fever").get_json()
-        self.assertEqual(o, {"type": "question", "reply": "How many days?", "level": None, "symptoms_en": ["fever"]})
+        self.assertEqual(o, {"type": "question", "reply": "How many days?", "level": None, "symptoms_en": ["fever"],
+                             "language": "en"})
+
+    def test_detected_language_and_specialty(self):
+        fake = {"type": "final", "level": "AMBER", "reply": "x", "reason": "r", "advice": "a",
+                "specialty": "Eye", "facility": "chc", "language": "hi"}
+        with mock.patch.object(backend, "call_llm", return_value=fake):
+            o = post(self.c, "aankh mein dard hai", "en").get_json()
+        self.assertEqual((o["specialty"], o["facility"], o["language"]), ("eye", "chc", "hi"))
+
+    def test_bad_specialty_and_facility_get_defaults(self):
+        fake = {"type": "final", "level": "RED", "reply": "x", "reason": "r", "advice": "a",
+                "specialty": "astrology", "facility": "phc", "language": "xx"}
+        with mock.patch.object(backend, "call_llm", return_value=fake):
+            o = post(self.c, "very unwell", "kn").get_json()
+        # RED never sends people to a PHC; unknown values fall back
+        self.assertEqual((o["specialty"], o["facility"], o["language"]), ("emergency", "district_hospital", "kn"))
 
     def test_final_bad_level_becomes_amber(self):
         fake = {"type": "final", "reply": "See PHC", "level": "yellow", "reason": "r", "advice": "a"}
@@ -60,7 +77,7 @@ class ChatTests(unittest.TestCase):
         self.assertEqual((o["type"], o["level"], o["symptoms_en"]), ("final", "AMBER", []))
 
     def test_llm_symptoms_trigger_red_override(self):
-        fake = {"type": "final", "level": "GREEN", "reply": "ok", "reason": "r", "advice": "a",
+        fake = {"type": "final", "level": "GREEN", "reply": "ಸರಿ", "reason": "r", "advice": "a",
                 "symptoms_en": ["blood in urine", "fever"]}
         with mock.patch.object(backend, "call_llm", return_value=fake):
             o = post(self.c, "ಜ್ವರ ಮತ್ತು ಕೆಂಪು ಮೂತ್ರ", "kn").get_json()
@@ -70,13 +87,13 @@ class ChatTests(unittest.TestCase):
     def test_garbage_llm_output_is_error(self):
         for fake in [{"type": "question", "reply": ""}, {"foo": 1}, ["x"]]:
             with mock.patch.object(backend, "call_llm", return_value=fake):
-                o = post(self.c, "I feel tired", "hi").get_json()
+                o = post(self.c, "मुझे थकान है", "en").get_json()  # error text follows the typed language
             self.assertEqual(o, {"type": "error", "reply": backend.ERR_MSG["hi"]}, fake)
 
     def test_llm_exception_is_error(self):
         with mock.patch.object(backend, "call_llm", side_effect=RuntimeError("GEMINI_API_KEY missing")):
-            o = post(self.c, "I feel tired", "ta").get_json()
-        self.assertEqual(o, {"type": "error", "reply": backend.ERR_MSG["ta"]})
+            o = post(self.c, "I feel tired", "ta").get_json()  # English typed -> English error
+        self.assertEqual(o, {"type": "error", "reply": backend.ERR_MSG["en"]})
 
     def test_bad_history_and_language_are_tolerated(self):
         fake = {"type": "question", "reply": "?", "level": None}
@@ -110,6 +127,40 @@ class ChatTests(unittest.TestCase):
              mock.patch.object(backend.requests, "post", return_value=resp):
             out = backend.call_llm([], "fever", "en")
         self.assertEqual(out, {"type": "question", "reply": "Age?"})
+
+
+class LanguageTests(unittest.TestCase):
+    def setUp(self):
+        self.c = backend.app.test_client()
+
+    def test_script_lang(self):
+        self.assertEqual(backend.script_lang("I have fever"), "latin")
+        self.assertEqual(backend.script_lang("मुझे बुखार है"), "hi")
+        self.assertEqual(backend.script_lang("ಜ್ವರ ಇದೆ"), "kn")
+        self.assertIsNone(backend.script_lang("3"))
+
+    def test_english_input_gets_english_red_message_even_if_kannada_selected(self):
+        o = post(self.c, "My father has chest pain", "kn").get_json()
+        self.assertEqual((o["reply"], o["language"]), (backend.RED_MSG["en"], "en"))
+
+    def test_hindi_input_tells_llm_to_reply_in_hindi(self):
+        fake = {"type": "question", "reply": "कितने दिन?", "symptoms_en": ["fever"]}
+        with mock.patch.object(backend, "call_llm", return_value=fake) as llm:
+            o = post(self.c, "मुझे बुखार है", "kn").get_json()
+        self.assertIn("Reply ONLY in Hindi", llm.call_args.kwargs["rule"])
+        self.assertEqual(o["language"], "hi")
+
+    def test_english_input_rule_and_language_follow_the_reply(self):
+        fake = {"type": "question", "reply": "How many days?", "symptoms_en": ["fever"], "language": "kn"}
+        with mock.patch.object(backend, "call_llm", return_value=fake) as llm:
+            o = post(self.c, "I have fever and headache", "kn").get_json()
+        self.assertIn("reply ONLY in English", llm.call_args.kwargs["rule"])
+        self.assertEqual(o["language"], "en")  # reply is English, so the UI must not stay on Kannada
+
+    def test_short_answer_keeps_conversation_language(self):
+        lang, rule = backend.reply_rule("yes", "hi")
+        self.assertEqual(lang, "hi")
+        self.assertIn("continue in Hindi", rule)
 
 
 class ModelFallbackTests(unittest.TestCase):
@@ -164,6 +215,14 @@ class ProfileTests(unittest.TestCase):
 
 
 class PlacesTests(unittest.TestCase):
+    def test_place_specialties(self):
+        self.assertEqual(backend.place_specialties({"name": "Sri Netra Eye Hospital"}), ["eye"])
+        self.assertEqual(backend.place_specialties({"name": "Govt Hospital", "emergency": "yes",
+                                                    "healthcare:speciality": "paediatrics;gynaecology"}),
+                         ["child", "maternity", "emergency"])
+        for n in ["Parent Care Center", "Resident Student Accident Clinic", "\u0ca8\u0cb0\u0cb8\u0cbf\u0c82\u0cb9 Hospital"]:
+            self.assertEqual(backend.place_specialties({"name": n}), [], n)
+
     def test_classify(self):
         c = backend.classify_place
         self.assertEqual(c({"amenity": "hospital", "name": "Taluk General Hospital"}), ("govt", "govt_hospital"))
@@ -200,6 +259,17 @@ class PlacesTests(unittest.TestCase):
         self.assertEqual(fp.call_count, 1)
         with mock.patch.object(backend, "find_places", side_effect=RuntimeError("down")):
             self.assertEqual(c.get("/places?lat=13&lon=77").status_code, 502)
+
+    def test_reverse(self):
+        c = backend.app.test_client()
+        self.assertEqual(c.get("/reverse?lat=x&lon=1").status_code, 400)
+        resp = mock.Mock()
+        resp.json.return_value = {"display_name": "long", "address": {
+            "suburb": "Rajarajeshwari Nagar", "city": "Bengaluru", "state": "Karnataka"}}
+        with mock.patch.object(backend.requests, "get", return_value=resp):
+            self.assertEqual(c.get("/reverse?lat=12.9&lon=77.5").get_json(), {"name": "Rajarajeshwari Nagar, Bengaluru"})
+        with mock.patch.object(backend.requests, "get", side_effect=RuntimeError("down")):
+            self.assertEqual(c.get("/reverse?lat=12.9&lon=77.5").status_code, 502)
 
     def test_falls_back_to_nominatim(self):
         nom = [{"lat": 12.53, "lon": 76.9, "tags": {"healthcare": "centre", "name": "Urban Primary Health Centre"}}] * 1

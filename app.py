@@ -38,7 +38,7 @@ Assume the user is in Karnataka. Next steps must use Karnataka's public system: 
 nearest Primary Health Centre (PHC), Community Health Centre (CHC), taluk or district government hospital.
 Keep in mind illnesses common in Karnataka (dengue, malaria, chikungunya, diarrhoea/dehydration, heat illness, snakebite).
 Never recommend specific medicines or doses.
-Reply ONLY in {lang}. Use simple, short words.
+Always reply in the SAME language as the user's latest message (see the language rule at the end). Use simple, short words.
 Each turn do exactly ONE of:
 1) Ask ONE short follow-up question (max 2 follow-ups in total), or
 2) Give a final triage.
@@ -46,9 +46,56 @@ Triage levels: RED = go to hospital / call 108 now; AMBER = see a doctor/PHC wit
 GREEN = home care, watch for worsening.
 When unsure between two levels, choose the more serious one.
 Output STRICT JSON only:
-{{"type":"question"|"final","reply":"<text in {lang}>","level":"RED"|"AMBER"|"GREEN"|null,
-"reason":"<1 sentence in {lang}, final only>","advice":"<1-3 short steps in {lang}, final only>",
+{{"type":"question"|"final","reply":"<text in the reply language>","level":"RED"|"AMBER"|"GREEN"|null,
+"reason":"<1 sentence, final only>","advice":"<1-3 short steps, final only>",
+"specialty":"<final only: the doctor speciality that fits best, one of: {specs}>",
+"facility":"<final only: where to go, one of: phc, chc, district_hospital, specialty_hospital>",
+"language":"<code of the language you replied in: en, kn, hi, ta, te or ml>",
 "symptoms_en":["<each symptom the user has, in English>"]}}"""
+
+# Doctor specialities the bot may recommend (frontend translates sp_<key>)
+SPECIALTIES = ("general", "emergency", "heart", "child", "maternity", "bone", "eye", "ent", "dental",
+               "skin", "mental", "kidney", "chest", "neuro", "cancer")
+FACILITIES = ("phc", "chc", "district_hospital", "specialty_hospital")
+DEFAULT_FACILITY = {"RED": "district_hospital", "AMBER": "phc", "GREEN": "phc"}
+
+SCRIPT_RANGES = {"kn": (0x0C80, 0x0CFF), "hi": (0x0900, 0x097F), "ta": (0x0B80, 0x0BFF),
+                 "te": (0x0C00, 0x0C7F), "ml": (0x0D00, 0x0D7F)}
+
+
+def script_lang(text):
+    """Language from the script of `text`: a code for Indic scripts, "latin" for English letters, None if unclear."""
+    counts, latin = dict.fromkeys(SCRIPT_RANGES, 0), 0
+    for ch in text or "":
+        if "a" <= ch.lower() <= "z":
+            latin += 1
+            continue
+        o = ord(ch)
+        for code, (lo, hi) in SCRIPT_RANGES.items():
+            if lo <= o <= hi:
+                counts[code] += 1
+                break
+    best = max(counts, key=counts.get)
+    if counts[best] >= 2 and counts[best] >= latin:
+        return best
+    return "latin" if latin >= 2 else None
+
+
+def reply_rule(message, ui_lang):
+    """(language code used for fixed messages, instruction for the LLM) based on what the user actually typed."""
+    sl = script_lang(message)
+    if sl in LANG_NAMES:
+        name = LANG_NAMES[sl]
+        return sl, f"LANGUAGE RULE: the user wrote in {name}. Reply ONLY in {name}, in {name} script."
+    if sl == "latin":
+        short = len(message.split()) <= 2  # "yes", "2 days": keep the conversation's language
+        keep = f" If it is only yes/no or a number, continue in {LANG_NAMES[ui_lang]}." if short and ui_lang != "en" else ""
+        return ("en" if not keep else ui_lang), (
+            "LANGUAGE RULE: the user wrote in English letters. If the words are English, reply ONLY in English. "
+            "If they are clearly an Indian language typed in English letters (e.g. 'mujhe bukhar hai' = Hindi, "
+            "'nanage jwara ide' = Kannada, 'enakku kaichal' = Tamil), reply in that language in its own script." + keep +
+            " Never reply in a language the user did not use.")
+    return ui_lang, f"LANGUAGE RULE: reply in {LANG_NAMES[ui_lang]}."
 
 
 def profile_summary(p):
@@ -105,7 +152,7 @@ def post_gemini(key, body):
     raise RuntimeError("no Gemini model available")
 
 
-def call_llm(history, message, lang, force_final=False, profile=""):
+def call_llm(history, message, lang, force_final=False, profile="", rule=""):
     key = os.getenv("GEMINI_API_KEY")
     if not key:
         raise RuntimeError("GEMINI_API_KEY missing")
@@ -114,13 +161,14 @@ def call_llm(history, message, lang, force_final=False, profile=""):
         role = "user" if h.get("role") == "user" else "model"
         contents.append({"role": role, "parts": [{"text": h.get("text", "")}]})
     contents.append({"role": "user", "parts": [{"text": message}]})
-    system = SYSTEM_PROMPT.format(lang=LANG_NAMES[lang])
+    system = SYSTEM_PROMPT.format(lang=LANG_NAMES[lang], specs=", ".join(SPECIALTIES))
     if profile:
         system += ("\nAbout the patient (from their saved family profile, may be incomplete): " + profile +
                    ".\nUse this when choosing the level: older age, young children, pregnancy, diabetes, heart, "
                    "lung or kidney disease raise the risk. Do not ask again for facts given here.")
     if force_final:
         system += "\nYou have already asked the maximum number of follow-up questions. You MUST give a final triage now."
+    system += "\n" + (rule or reply_rule(message, lang)[1])
     body = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": contents,
@@ -156,8 +204,9 @@ def normalize(out, lang):
     symptoms = out.get("symptoms_en")
     symptoms = [str(x) for x in symptoms] if isinstance(symptoms, list) else []
     reply = str(out.get("reply") or "").strip()
+    detected = out.get("language") if out.get("language") in LANG_NAMES else lang
     if out.get("type") == "question" and reply:
-        return {"type": "question", "reply": reply, "level": None, "symptoms_en": symptoms}
+        return {"type": "question", "reply": reply, "level": None, "symptoms_en": symptoms, "language": detected}
     level = str(out.get("level") or "").upper()
     if out.get("type") == "final" or level in ("RED", "AMBER", "GREEN"):
         if level not in ("RED", "AMBER", "GREEN"):
@@ -166,14 +215,21 @@ def normalize(out, lang):
         advice = str(out.get("advice") or "").strip() or reply
         if not (reply or reason or advice):
             return None
+        spec = str(out.get("specialty") or "").strip().lower()
+        fac = str(out.get("facility") or "").strip().lower()
+        if level == "RED":
+            fac = "district_hospital" if fac not in ("district_hospital", "specialty_hospital") else fac
         return {"type": "final", "level": level, "reply": reply or reason,
-                "reason": reason, "advice": advice, "symptoms_en": symptoms}
+                "reason": reason, "advice": advice, "symptoms_en": symptoms,
+                "specialty": spec if spec in SPECIALTIES else ("emergency" if level == "RED" else "general"),
+                "facility": fac if fac in FACILITIES else DEFAULT_FACILITY[level], "language": detected}
     return None
 
 
 def red_response(lang, kw):
     return {"type": "final", "level": "RED", "reply": RED_MSG[lang],
-            "reason": RED_MSG[lang], "advice": RED_MSG[lang], "matched": kw}
+            "reason": RED_MSG[lang], "advice": RED_MSG[lang], "matched": kw,
+            "specialty": "emergency", "facility": "district_hospital", "language": lang}
 
 
 @app.get("/")
@@ -192,28 +248,37 @@ def chat():
     history = clean_history(data.get("history"))
     if not message:
         return jsonify({"error": "empty"}), 400
+    # Answer in the language the user actually typed/spoke, not just the one selected in the app
+    msg_lang, rule = reply_rule(message, lang)
 
     # Step 3: red-flag scan on this message + earlier user turns, no LLM
     user_text = " ".join([h.get("text", "") for h in history if h.get("role") == "user"] + [message])
     kw = find_red_flag(user_text)
     if kw:
-        return jsonify(red_response(lang, kw))
+        return jsonify(red_response(msg_lang, kw))
 
     # Step 4: LLM
     try:
         asked = sum(1 for h in history if h["role"] == "bot")
         out = normalize(call_llm(history, message, lang, force_final=asked >= MAX_FOLLOWUPS,
-                                 profile=profile_summary(data.get("profile"))), lang)
+                                 profile=profile_summary(data.get("profile")), rule=rule), msg_lang)
     except Exception as e:
         app.logger.error("LLM failed: %s", e)
         out = None
     if out is None:
-        return jsonify({"type": "error", "reply": ERR_MSG[lang]})
+        return jsonify({"type": "error", "reply": ERR_MSG[msg_lang]})
+
+    # The language field must match what the reply is really written in (the UI switches to it)
+    rl = script_lang(out.get("reply", ""))
+    if rl in LANG_NAMES:
+        out["language"] = rl
+    elif rl == "latin":
+        out["language"] = "en"
 
     # Step 5: safety override on LLM's English symptom list
     kw = find_red_flag(" ".join(out.get("symptoms_en") or []))
     if kw and out.get("level") != "RED":
-        return jsonify(red_response(lang, kw))
+        return jsonify(red_response(out.get("language", msg_lang), kw))
     return jsonify(out)
 
 
@@ -234,6 +299,37 @@ GOVT_RE = re.compile(r"\b(phc|chc|primary health|community health|taluk|taluka|d
                      r"ayushman arogya|arogya kendra|public health)\b", re.I)
 NGO_HEALTH_RE = re.compile(r"health|medical|hospital|clinic|care|arogya|aarogya|seva|cancer|eye|blind|deaf|"
                            r"disab|hiv|\btb\b|mental|nutrition|mother|maternal|child", re.I)
+
+
+# OSM healthcare:speciality values and name words (English + local languages) -> our speciality keys
+SPEC_PATTERNS = {
+    "heart": r"cardi|heart|hrudaya|ಹೃದಯ|हृदय|இதய|హృదయ|ഹൃദയ",
+    "child": r"paediatric|pediatric|child|kids|neonat|shishu|makkala|ಮಕ್ಕಳ|शिशु|குழந்தை|పిల్లల|ശിശു|കുട്ടി",
+    "maternity": r"gyn|obstet|maternity|women|mother|prasuti|ಹೆರಿಗೆ|प्रसूति|மகப்பேறு|ప్రసూతి|പ്രസവ",
+    "bone": r"ortho|\bbone|fracture|joint|spine|ಮೂಳೆ|हड्डी|எலும்பு|ఎముక|അസ്ഥി",
+    "eye": r"ophthalm|\beye|netra|nethra|vision|ನೇತ್ರ|नेत्र|கண் மருத்துவ|కంటి|നേത്ര",
+    "ent": r"otolaryng|\bent\b|ear,? nose",
+    "dental": r"\bdent|teeth|tooth|ದಂತ|दंत|பல் மருத்துவ|దంత|ദന്ത",
+    "skin": r"dermat|\bskin|ಚರ್ಮ|त्वचा|தோல்|చర్మ|ത്വക്",
+    "mental": r"psychiat|mental|\bmind\b|nimhans|ಮಾನಸಿಕ|मानसिक|மனநல|మానసిక|മാനസിക",
+    "kidney": r"nephro|urolog|kidney|dialysis|ಮೂತ್ರಪಿಂಡ|गुर्दा|சிறுநீரக|కిడ్నీ|വൃക്ക",
+    "chest": r"pulmon|chest|respirat|\btb\b|tuberculosis|lung|ಎದೆ|छाती|நுரையீரல்|ఛాతీ|ശ്വാസകോശ",
+    "neuro": r"neuro|brain|stroke|ನರರೋಗ|तंत्रिका|நரம்பியல்|నరాల|നാഡീ",
+    "cancer": r"oncolog|cancer|kidwai|ಕ್ಯಾನ್ಸರ್|कैंसर|புற்றுநோய்|క్యాన్సర్|കാൻസർ",
+    "emergency": r"emergency|trauma|casualty|ತುರ್ತು|आपातकालीन|அவசர|అత్యవసర|അത്യാഹിത",
+}
+SPEC_RE = {k: re.compile(v, re.I) for k, v in SPEC_PATTERNS.items()}
+
+
+def place_specialties(tags):
+    """Which of our speciality keys this place offers, from its OSM tags and name."""
+    text = " ".join(tags.get(k, "") for k in ("healthcare:speciality", "name", "name:en", "name:kn", "description"))
+    found = [k for k, rx in SPEC_RE.items() if rx.search(text)]
+    if tags.get("emergency") == "yes" and "emergency" not in found:
+        found.append("emergency")
+    if tags.get("amenity") == "dentist" and "dental" not in found:
+        found.append("dental")
+    return found
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -271,7 +367,7 @@ def classify_place(tags):
 def overpass(lat, lon, radius_m):
     q = f"""[out:json][timeout:25];
 (
-  nwr(around:{radius_m},{lat},{lon})[amenity~"^(hospital|clinic|doctors)$"];
+  nwr(around:{radius_m},{lat},{lon})[amenity~"^(hospital|clinic|doctors|dentist)$"];
   nwr(around:{radius_m},{lat},{lon})[healthcare~"^(hospital|clinic|centre|doctor)$"];
   nwr(around:{radius_m},{lat},{lon})[office=ngo];
   nwr(around:{radius_m},{lat},{lon})[amenity=social_facility];
@@ -320,7 +416,7 @@ def nominatim_places(lat, lon, half_deg):
             a = x.get("address") or {}
             parts = [a.get(k) for k in ("road", "village", "suburb", "town", "city", "county") if a.get(k)]
             tags.setdefault("addr:full", ", ".join(dict.fromkeys(parts)))
-            if not (tags.get("amenity") in ("hospital", "clinic", "doctors") or tags.get("healthcare")
+            if not (tags.get("amenity") in ("hospital", "clinic", "doctors", "dentist") or tags.get("healthcare")
                     or tags.get("office") == "ngo" or tags.get("amenity") == "social_facility"):
                 continue  # text match on something that isn't a health facility
             elements.append({"lat": float(x["lat"]), "lon": float(x["lon"]), "tags": tags})
@@ -376,6 +472,7 @@ def build_places(elements, lat, lon):
             "phone": tags.get("phone") or tags.get("contact:phone") or tags.get("contact:mobile") or "",
             "address": addr, "emergency": tags.get("emergency") == "yes",
             "opening_hours": tags.get("opening_hours", ""),
+            "specialties": place_specialties(tags),
         })
     out.sort(key=lambda p: p["distance_km"])
     # cap each kind separately so far-away PHCs aren't pushed out by many nearby clinics
@@ -406,6 +503,31 @@ def places():
     payload = {"places": found, "radius_km": radius_km, "source": "OpenStreetMap"}
     PLACES_CACHE[key] = (time.time(), payload)
     return jsonify(payload)
+
+
+@app.get("/reverse")
+def reverse():
+    """Coordinates -> short place name, so the user can check that their location is right."""
+    try:
+        lat, lon = float(request.args["lat"]), float(request.args["lon"])
+        assert -90 <= lat <= 90 and -180 <= lon <= 180
+    except Exception:
+        return jsonify({"error": "bad location"}), 400
+    lang = request.args.get("lang", "en")
+    try:
+        r = requests.get("https://nominatim.openstreetmap.org/reverse", headers=OSM_HEADERS, timeout=15, params={
+            "lat": lat, "lon": lon, "format": "jsonv2", "zoom": 16,
+            "accept-language": lang if lang in LANG_NAMES else "en"})
+        r.raise_for_status()
+        d = r.json()
+    except Exception as e:
+        app.logger.error("reverse failed: %s", e)
+        return jsonify({"error": "unavailable"}), 502
+    a = d.get("address") or {}
+    local = next((a[k] for k in ("village", "hamlet", "suburb", "neighbourhood", "quarter") if a.get(k)), "")
+    area = next((a[k] for k in ("town", "city", "county", "state_district") if a.get(k)), "")
+    name = ", ".join(dict.fromkeys(x for x in (local, area) if x)) or d.get("display_name", "")
+    return jsonify({"name": name})
 
 
 @app.get("/geocode")

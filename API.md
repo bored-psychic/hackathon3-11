@@ -17,13 +17,18 @@ After 2 bot questions in `history` the backend tells the LLM it must give a fina
 Response JSON — 3 shapes, switch on `type`:
 
 1. Follow-up question
-       {"type": "question", "reply": "text in user's language", "level": null, "symptoms_en": [...]}
+       {"type": "question", "reply": "text in user's language", "level": null, "symptoms_en": [...], "language": "hi"}
    -> show as a chat bubble, keep chatting.
 
 2. Final triage
-       {"type": "final", "level": "RED" | "AMBER" | "GREEN", "reply": "...", "reason": "...", "advice": "...", "symptoms_en": [...]}
+       {"type": "final", "level": "RED" | "AMBER" | "GREEN", "reply": "...", "reason": "...", "advice": "...", "symptoms_en": [...],
+        "specialty": "general"|"emergency"|"heart"|"child"|"maternity"|"bone"|"eye"|"ent"|"dental"|"skin"|"mental"|"kidney"|"chest"|"neuro"|"cancer",
+        "facility": "phc"|"chc"|"district_hospital"|"specialty_hospital", "language": "kn"}
    -> show coloured card (level), reason, advice. RED/AMBER: show "Call 108" button (tel:108). Conversation is over; clear history.
-   RED from the hard-coded check also has `"matched": "<keyword>"` (ignore it in UI).
+   RED from the hard-coded check also has `"matched": "<keyword>"` (ignore it in UI); its specialty is "emergency".
+   `specialty` / `facility` = recommended kind of doctor and building (RED is never sent to a PHC).
+   `language` = language the user actually wrote in (also detects e.g. Hindi typed in English letters); the reply is in it,
+   so the UI switches to it.
 
 3. Error
        {"type": "error", "reply": "text in user's language"}
@@ -35,10 +40,11 @@ Nearby health facilities from OpenStreetMap (Overpass, with Nominatim as fallbac
     {"places": [{"name": "...", "local_name": "...", "kind": "govt"|"hospital"|"clinic"|"ngo",
                  "sub": "phc"|"chc"|"subcentre"|"govt_hospital"|"govt_centre"|"hospital"|"clinic"|"ngo"|"charity_hospital",
                  "lat": 12.5, "lon": 76.9, "distance_km": 1.2, "phone": "...", "address": "...",
-                 "emergency": true, "opening_hours": "..."}],
+                 "emergency": true, "opening_hours": "...", "specialties": ["eye", "child", ...]}],
      "radius_km": 13, "source": "OpenStreetMap"}
 
-Sorted by distance, max 25 per kind. Bad lat/lon -> 400 {"error": "bad location"}; both sources down -> 502 {"error": "unavailable"}.
+Sorted by distance, max 25 per kind. `specialties` (same keys as /chat `specialty`) come from the OSM
+`healthcare:speciality` / `emergency` tags and words in the name (English + local scripts). Bad lat/lon -> 400 {"error": "bad location"}; both sources down -> 502 {"error": "unavailable"}.
 
 ## GET /geocode?q=Pandavapura&lang=kn
 Village / town name -> coordinates (Nominatim, India only, Karnataka preferred).
@@ -46,6 +52,13 @@ Village / town name -> coordinates (Nominatim, India only, Karnataka preferred).
     {"results": [{"name": "Pandavapura, Mandya district, Karnataka, India", "lat": 12.49, "lon": 76.67}]}
 
 Empty q -> 400 {"error": "empty"}; lookup failed -> 502 {"error": "unavailable"}.
+
+## GET /reverse?lat=12.52&lon=76.89&lang=kn
+Coordinates -> short place name, so the user can confirm the GPS fix is right (Nominatim reverse).
+
+    {"name": "Pandavapura, Mandya"}
+
+Bad coordinates -> 400 {"error": "bad location"}; lookup failed -> 502 {"error": "unavailable"}.
 
 ## Notes
 - Run locally: http://localhost:5001

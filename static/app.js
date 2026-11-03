@@ -11,6 +11,7 @@
   var PLACES_TIMEOUT_MS = 75000;      // OpenStreetMap lookups can be slow
   var STORE_KEY = 'triage-app-v1';
   var DAY = 86400000;
+  var APPROX_M = 3000;                // a location fix worse than this is "approximate" (Wi-Fi / IP based)
 
   var CONDITIONS = ['diabetes', 'bp', 'heart', 'lung', 'kidney', 'tb', 'epilepsy'];
   var COND_EN = { diabetes: 'diabetes', bp: 'high blood pressure', heart: 'heart disease',
@@ -18,6 +19,8 @@
   var RELATIONS = ['self', 'spouse', 'child', 'parent', 'grandparent', 'sibling', 'other'];
   var HELPLINES = ['108', '112', '104', '14416'];
   var FILTERS = [['all', 'fAll'], ['govt', 'fGovt'], ['hospital', 'fHospital'], ['clinic', 'fClinic'], ['ngo', 'fNgo']];
+  var AVATAR_COLORS = ['#0a7d4f', '#1565c0', '#6a1b9a', '#c2185b', '#ef6c00', '#00838f'];
+  var KIND_COLORS = { govt: '#0a7d4f', hospital: '#c62828', clinic: '#1565c0', ngo: '#6a1b9a' };
 
   var ICONS = {
     home: '<path d="M12 3 2 12h3v8h5v-6h4v6h5v-8h3z"/>',
@@ -29,13 +32,15 @@
     speaker: '<path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/>',
     route: '<path d="M21.7 11.3 12.7 2.3a1 1 0 0 0-1.4 0l-9 9a1 1 0 0 0 0 1.4l9 9a1 1 0 0 0 1.4 0l9-9a1 1 0 0 0 0-1.4zM14 14.5V12h-4v3H8v-4a1 1 0 0 1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/>',
     plus: '<path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/>',
+    cross: '<path d="M9.5 3h5v6.5H21v5h-6.5V21h-5v-6.5H3v-5h6.5z"/>',
     edit: '<path d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zM20.7 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>',
     target: '<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 3h-2.1A7 7 0 0 0 13 5.1V3h-2v2.1A7 7 0 0 0 5.1 11H3v2h2.1a7 7 0 0 0 5.9 5.9V21h2v-2.1a7 7 0 0 0 5.9-5.9H21v-2zm-9 6a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>',
-    sms: '<path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zM9 11H7V9h2v2zm4 0h-2V9h2v2zm4 0h-2V9h2v2z"/>'
+    sms: '<path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zM9 11H7V9h2v2zm4 0h-2V9h2v2zm4 0h-2V9h2v2z"/>',
+    bell: '<path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-5-5.9V4a1 1 0 0 0-2 0v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/>',
+    clock: '<path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 11H8v-2h3V6h2v7z"/>'
   };
   function icon(name) {
     var s = document.createElement('span');
-    s.style.display = 'inline-flex';
     s.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ICONS[name] + '</svg>'; // static only
     return s.firstChild;
   }
@@ -91,9 +96,48 @@
     if (vars && typeof s === 'string') s = s.replace(/\{(\w+)\}/g, function (_, k) { return vars[k] != null ? vars[k] : ''; });
     return s;
   }
-  function fmtDate(ts, withTime) {
-    var o = withTime ? { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' } : { day: 'numeric', month: 'short' };
-    try { return new Date(ts).toLocaleString(SPEECH_LANG[lang()] || 'en-IN', o); } catch (e) { return new Date(ts).toDateString(); }
+  function fmtDate(ts, opts) {
+    try { return new Date(ts).toLocaleString(SPEECH_LANG[lang()] || 'en-IN', opts); } catch (e) { return new Date(ts).toDateString(); }
+  }
+  function shortDate(ts) { return fmtDate(ts, { day: 'numeric', month: 'short' }); }
+  function dateTime(ts) { return fmtDate(ts, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); }
+  function fmtKm(km) { return km < 10 ? km.toFixed(1) : String(Math.round(km)); }
+
+  /* ---------- Language auto-detection ----------
+     1) Native script in what was typed / heard (ಕನ್ನಡ, हिन्दी, …) -> that language, before sending.
+     2) The server also reports the language of each message (catches "mujhe bukhar hai" typed in English letters).
+     Either way the app, the replies and the next mic session switch to that language. */
+  var SCRIPTS = [['kn', /[ಀ-೿]/g], ['hi', /[ऀ-ॿ]/g], ['ta', /[஀-௿]/g],
+    ['te', /[ఀ-౿]/g], ['ml', /[ഀ-ൿ]/g]];
+  function detectScript(text) {
+    var best = null, most = 0;
+    SCRIPTS.forEach(function (s) {
+      var n = (text.match(s[1]) || []).length;
+      if (n > most) { most = n; best = s[0]; }
+    });
+    return most >= 2 ? best : null; // English letters: leave it to the server
+  }
+  function langName(code) {
+    var o = langSel.querySelector('option[value="' + code + '"]');
+    return code === 'en' ? 'English' : (o ? o.textContent : code);
+  }
+  function switchLang(code, noteEl) {
+    if (!T[code] || code === lang()) return false;
+    langSel.value = code;
+    applyLanguage();
+    refreshListenButtons();
+    if (noteEl) noteEl.textContent = '🌐 ' + t('langSwitched', { lang: langName(code) });
+    return true;
+  }
+  // First visit: use the phone's language if we support it, else Kannada.
+  function initialLang() {
+    if (T[store.lang]) return store.lang;
+    var prefs = navigator.languages || [navigator.language || ''];
+    for (var i = 0; i < prefs.length; i++) {
+      var c = String(prefs[i] || '').slice(0, 2).toLowerCase();
+      if (T[c] && c !== 'en') return c;
+    }
+    return DEFAULT_LANG;
   }
 
   function applyLanguage() {
@@ -107,6 +151,40 @@
     });
     store.lang = code;
     save();
+  }
+
+  /* ---------- Small shared pieces ---------- */
+  function colorFor(id) {
+    var n = 0;
+    for (var i = 0; i < (id || '').length; i++) n += id.charCodeAt(i);
+    return AVATAR_COLORS[n % AVATAR_COLORS.length];
+  }
+  function avatar(m) {
+    return h('span', { class: 'avatar', style: 'background:' + colorFor(m.id), text: (m.name || '?').trim().charAt(0).toUpperCase() });
+  }
+  function sectionTitle(ic, text) { return h('h3', { class: 'sec' }, [icon(ic), text]); }
+  function memberMeta(m) {
+    var bits = [t('rel_' + (m.relation || 'other'))];
+    if (m.age != null && m.age !== '') bits.push(t('yrs', { n: m.age }));
+    if (m.pregnant) bits.push(t('pfPregnant'));
+    return bits.join(' · ');
+  }
+  function helplinesBlock() {
+    return h('div', null, [sectionTitle('phone', t('helplines')), h('div', { class: 'helplines' }, HELPLINES.map(function (n) {
+      return h('a', { class: 'helpline', href: 'tel:' + n }, [h('span', { class: 'hl-ico' }, [icon('phone')]),
+        h('span', null, [h('b', { text: n }), h('span', { class: 'lbl', text: t('hl' + n) })])]);
+    }))]);
+  }
+  async function fetchJSON(url, opts, timeoutMs) {
+    var ctrl = window.AbortController ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs) : null;
+    try {
+      var res = await fetch(url, Object.assign({}, opts || {}, { signal: ctrl ? ctrl.signal : undefined }));
+      var data = await res.json();
+      return { ok: res.ok, data: data };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /* ---------- Router: #home | #check | #near | #family ---------- */
@@ -142,35 +220,52 @@
     for (var i = store.checks.length - 1; i >= 0; i--) if (store.checks[i].memberId === id) return store.checks[i];
     return null;
   }
+  function tile(ic, label, color, onclick) {
+    return h('button', { class: 'tile ' + color, type: 'button', onclick: onclick },
+      [h('span', { class: 'tile-ico' }, [icon(ic)]), h('span', { class: 'tile-lbl', text: label })]);
+  }
 
   function renderHome() {
     var v = $('view-home');
     v.textContent = '';
-    v.appendChild(h('h2', { class: 'hello', text: t('hello') + ' 🙏' }));
-    v.appendChild(h('button', { class: 'btn primary big', type: 'button', onclick: function () { startCheckFor(''); } },
-      [icon('chat'), t('startCheck')]));
+
+    // Hero banner with the main action
+    v.appendChild(h('section', { class: 'hero' }, [
+      h('div', { class: 'hero-date', text: fmtDate(Date.now(), { weekday: 'long', day: 'numeric', month: 'long' }) }),
+      h('h2', { text: t('hello') + ' 🙏' }),
+      h('p', { class: 'hero-sub', text: t('heroSub') }),
+      h('button', { class: 'btn hero-btn', type: 'button', onclick: function () { startCheckFor(''); } }, [icon('chat'), t('startCheck')])
+    ]));
+
+    // Quick actions
+    v.appendChild(h('div', { class: 'tiles' }, [
+      tile('pin', t('findHospital'), 'green', function () { openNearby('all'); }),
+      tile('people', t('navFamily'), 'blue', function () { go('family'); }),
+      h('a', { class: 'tile red', href: 'tel:108' }, [h('span', { class: 'tile-ico' }, [icon('phone')]), h('span', { class: 'tile-lbl', text: t('call108') })])
+    ]));
 
     // Alerts needing follow-up
-    v.appendChild(h('h3', { text: t('alerts') }));
     var al = activeAlerts();
+    v.appendChild(sectionTitle('bell', t('alerts')));
     if (!al.length) v.appendChild(h('p', { class: 'muted', text: t('noAlerts') }));
     al.slice().reverse().forEach(function (c) {
-      var follow = c.level === 'RED' ? t('goNow') : t('seeBy', { date: fmtDate(c.at + 2 * DAY) });
+      var follow = c.level === 'RED' ? t('goNow') : t('seeBy', { date: shortDate(c.at + 2 * DAY) });
       v.appendChild(h('div', { class: 'card alert ' + c.level }, [
         h('div', null, [h('span', { class: 'badge ' + c.level, text: t(c.level)[0] }), ' ', h('b', { text: whoName(c) })]),
-        h('div', { class: 'when', text: fmtDate(c.at, true) }),
+        h('div', { class: 'when', text: dateTime(c.at) }),
         c.reason ? h('div', { text: c.reason }) : null,
         h('div', { class: 'follow', text: follow }),
         h('div', { class: 'row-actions' }, [
           c.level === 'RED' ? h('a', { class: 'btn danger', href: 'tel:108' }, [icon('phone'), t('call108')]) : null,
-          h('button', { class: 'btn', type: 'button', onclick: function () { openNearby('all'); } }, [icon('pin'), t('findHospital')]),
+          h('button', { class: 'btn', type: 'button', onclick: function () { openNearby('all', c.specialty); } },
+            [icon('pin'), c.specialty && c.specialty !== 'general' ? t('findSpec', { spec: t('sp_' + c.specialty) }) : t('findHospital')]),
           h('button', { class: 'btn ghost', type: 'button', onclick: function () { c.done = true; save(); renderHome(); } }, [t('markDone')])
         ])
       ]));
     });
 
     // Family
-    v.appendChild(h('h3', { text: t('family') }));
+    v.appendChild(sectionTitle('people', t('family')));
     if (!store.members.length) {
       v.appendChild(h('div', { class: 'card' }, [
         h('b', { text: t('onboardTitle') }),
@@ -182,11 +277,11 @@
       store.members.forEach(function (m) {
         var last = lastCheckOf(m.id);
         grid.appendChild(h('button', { class: 'member', type: 'button', onclick: function () { startCheckFor(m.id); } }, [
-          h('div', { class: 'top' }, [h('span', { class: 'avatar', text: (m.name || '?').trim().charAt(0).toUpperCase() }),
+          h('div', { class: 'top' }, [avatar(m),
             h('div', null, [h('div', { class: 'name', text: m.name }), h('div', { class: 'meta', text: memberMeta(m) })])]),
           h('div', null, (m.conditions || []).slice(0, 3).map(function (c) { return h('span', { class: 'chip', text: t('c_' + c) }); })),
           h('div', { class: 'last' }, last
-            ? [t('lastCheck') + ': ', h('span', { class: 'badge ' + last.level, text: t(last.level)[0] }), ' ' + fmtDate(last.at)]
+            ? [t('lastCheck') + ': ', h('span', { class: 'badge ' + last.level, text: t(last.level)[0] }), ' ' + shortDate(last.at)]
             : [t('noCheckYet')])
         ]));
       });
@@ -194,12 +289,12 @@
     }
 
     // Recent checks
-    v.appendChild(h('h3', { text: t('recent') }));
     var recent = store.checks.slice(-8).reverse();
+    v.appendChild(sectionTitle('clock', t('recent')));
     if (!recent.length) v.appendChild(h('p', { class: 'muted', text: t('noChecks') }));
     else v.appendChild(h('div', { class: 'card' }, [h('ul', { class: 'checklist' }, recent.map(function (c) {
       return h('li', null, [h('span', { class: 'badge ' + c.level, text: t(c.level)[0] }),
-        h('div', { class: 'txt' }, [h('b', { text: whoName(c) }), h('span', { class: 'muted small', text: ' · ' + fmtDate(c.at, true) }),
+        h('div', { class: 'txt' }, [h('b', { text: whoName(c) }), h('span', { class: 'muted small', text: ' · ' + dateTime(c.at) }),
           c.reason ? h('div', { class: 'reason', text: c.reason }) : null])]);
     }))]));
 
@@ -207,17 +302,57 @@
     v.appendChild(h('p', { class: 'muted small', text: t('disclaimer') }));
   }
 
-  function memberMeta(m) {
-    var bits = [t('rel_' + (m.relation || 'other'))];
-    if (m.age != null && m.age !== '') bits.push(t('yrs', { n: m.age }));
-    if (m.pregnant) bits.push(t('pfPregnant'));
-    return bits.join(' · ');
+  /* =====================================================================
+     VOICE INPUT (Web Speech API) — words appear in the box while speaking
+     ===================================================================== */
+  var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var activeRec = null;
+
+  // Start/stop listening into `target`; `onFinal(text)` runs when the person stops speaking.
+  function toggleVoice(btn, target, onFinal, noteEl) {
+    if (activeRec) { activeRec.stop(); return; } // second tap stops listening
+    stopSpeaking();
+    var r;
+    try { r = new Recognition(); } catch (e) { btn.hidden = true; return; }
+    activeRec = r;
+    var before = target.value, heard = false, finalText = '';
+    var setNote = function (s) { if (noteEl) noteEl.textContent = s; };
+    r.lang = SPEECH_LANG[lang()] || 'en-IN';
+    r.interimResults = true;   // live partial words
+    r.continuous = false;      // stop after a pause
+    r.maxAlternatives = 1;
+    r.onstart = function () { btn.classList.add('on'); target.classList.add('live'); target.value = ''; setNote(t('listening')); };
+    r.onresult = function (ev) {
+      var interim = '';
+      finalText = '';
+      for (var i = 0; i < ev.results.length; i++) {
+        var s = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalText += s; else interim += s;
+      }
+      heard = true;
+      target.value = (finalText + interim).replace(/\s+/g, ' ').trim(); // type as they speak
+    };
+    r.onerror = function (ev) {
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') setNote(t('micDenied'));
+      else if (ev.error !== 'aborted') setNote(t('micNoSpeech'));
+    };
+    r.onend = function () {
+      btn.classList.remove('on');
+      target.classList.remove('live');
+      activeRec = null;
+      if (noteEl && noteEl.textContent === t('listening')) setNote('');
+      var text = (finalText || target.value).trim();
+      if (heard && text) onFinal(text);
+      else if (!target.value) target.value = before; // nothing said: put back what was there
+    };
+    try { r.start(); } catch (e) { activeRec = null; }
   }
 
-  function helplinesBlock() {
-    return h('div', null, [h('h3', { text: t('helplines') }), h('div', { class: 'helplines' }, HELPLINES.map(function (n) {
-      return h('a', { class: 'helpline', href: 'tel:' + n }, [h('b', { text: n }), h('span', { text: t('hl' + n) })]);
-    }))]);
+  function voiceButton(target, onFinal, noteEl) {
+    var b = h('button', { type: 'button', class: 'iconbtn', 'aria-label': t('speak'), title: t('speak') }, [icon('mic')]);
+    if (!Recognition) { b.hidden = true; return b; }
+    b.addEventListener('click', function () { toggleVoice(b, target, onFinal, noteEl); });
+    return b;
   }
 
   /* =====================================================================
@@ -228,6 +363,10 @@
   var busy = false;      // true while a /chat request is in flight
   var started = false;   // has the user sent anything in this check?
   micBtn.appendChild(icon('mic'));
+  if (Recognition) {
+    micBtn.hidden = false;
+    micBtn.addEventListener('click', function () { if (!busy || activeRec) toggleVoice(micBtn, input, send, note); });
+  }
 
   function renderCheck() {
     // (Re)build the "checking for" list, keeping the current choice.
@@ -254,12 +393,14 @@
   whoSel.addEventListener('change', function () { resetChat(); });
 
   function scrollDown() { chat.scrollTop = chat.scrollHeight; }
+  function botAvatar() { return h('span', { class: 'bot-av', 'aria-hidden': 'true' }, [icon('cross')]); }
 
   function addBubble(text, who, opts) {
     opts = opts || {};
-    var b = h('div', { class: 'bubble' + (opts.err ? ' err' : ''), text: text, lang: opts.lang || lang() });
-    var wrap = h('div', null, [b, who === 'bot' ? listenButton(text, opts.lang || lang()) : null]);
-    var row = h('div', { class: 'row ' + who }, [wrap]);
+    var code = opts.lang || lang();
+    var b = h('div', { class: 'bubble' + (opts.err ? ' err' : ''), text: text, lang: code });
+    var wrap = h('div', null, [b, who === 'bot' ? listenButton(text, code) : null]);
+    var row = h('div', { class: 'row ' + who }, [who === 'bot' ? botAvatar() : null, wrap]);
     chat.appendChild(row);
     scrollDown();
     return row;
@@ -268,6 +409,13 @@
   function showWelcome() {
     var m = member(whoSel.value);
     addBubble(m ? t('welcomeFor', { name: m.name }) : t('welcome'), 'bot');
+    // One-tap common problems (helps people who find typing hard)
+    chat.appendChild(h('div', { class: 'suggest' }, [
+      h('div', { class: 'suggest-lbl', text: t('common') }),
+      h('div', { class: 'chips' }, t('sugg').map(function (s) {
+        return h('button', { class: 'chip-btn', type: 'button', text: s, onclick: function () { send(s); } });
+      }))
+    ]));
   }
 
   function resetChat() {
@@ -283,8 +431,8 @@
   var typingRow = null;
   function showTyping(on) {
     if (on && !typingRow) {
-      typingRow = h('div', { class: 'row bot typing' }, [h('div', { class: 'bubble' }, [t('typing'),
-        h('span', { class: 'dots', 'aria-hidden': 'true' }, [h('span'), h('span'), h('span')])])]);
+      typingRow = h('div', { class: 'row bot typing' }, [botAvatar(), h('div', null, [h('div', { class: 'bubble' }, [t('typing'),
+        h('span', { class: 'dots', 'aria-hidden': 'true' }, [h('span'), h('span'), h('span')])])])]);
       chat.appendChild(typingRow);
       scrollDown();
     } else if (!on && typingRow) {
@@ -313,26 +461,17 @@
     return p;
   }
 
-  async function fetchJSON(url, opts, timeoutMs) {
-    var ctrl = window.AbortController ? new AbortController() : null;
-    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, timeoutMs) : null;
-    try {
-      var res = await fetch(url, Object.assign({}, opts || {}, { signal: ctrl ? ctrl.signal : undefined }));
-      var data = await res.json();
-      return { ok: res.ok, data: data };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
   async function send(text) {
     text = (text || '').trim();
     if (!text || busy) return;
-    var code = lang();
     var m = member(whoSel.value);
     input.value = '';
     note.textContent = '';
+    var det = detectScript(text);
+    if (det) switchLang(det, note); // typed or spoken in another script: follow it
+    var code = lang();
     started = true;
+    chat.querySelectorAll('.suggest').forEach(function (e) { e.remove(); });
     addBubble(text, 'user', { lang: code });
     setBusy(true);
 
@@ -355,6 +494,11 @@
       input.value = text;
       return;
     }
+    // The server detected another language (e.g. Hindi in English letters): the reply is in it, so follow.
+    if (data.type !== 'error' && T[data.language] && data.language !== code) {
+      switchLang(data.language, note);
+      code = data.language;
+    }
     if (data.type === 'final') {
       var rec = saveCheck(data, m);
       showResult(data, code, m, rec);
@@ -375,7 +519,9 @@
   function saveCheck(o, m) {
     var rec = { id: uid(), memberId: m ? m.id : '', at: Date.now(), level: levelOf(o),
       reason: (o.reason || o.reply || '').trim(), advice: (o.advice || '').trim(),
-      symptoms: Array.isArray(o.symptoms_en) ? o.symptoms_en.slice(0, 12) : [], done: false };
+      symptoms: Array.isArray(o.symptoms_en) ? o.symptoms_en.slice(0, 12) : [], done: false,
+      specialty: T.en['sp_' + o.specialty] ? o.specialty : 'general',
+      facility: T.en['fac_' + o.facility] ? o.facility : '' };
     store.checks.push(rec);
     if (store.checks.length > 200) store.checks = store.checks.slice(-200);
     save();
@@ -396,15 +542,21 @@
     if (showReply) card.appendChild(h('div', { class: 'text', text: reply }));
     if (reason) { card.appendChild(h('div', { class: 'label', text: L.why })); card.appendChild(h('div', { class: 'text', text: reason })); }
     if (advice && advice !== reason) { card.appendChild(h('div', { class: 'label', text: L.todo })); card.appendChild(h('div', { class: 'text', text: advice })); }
-    card.appendChild(listenButton([L[level][1], showReply ? reply : '', reason, advice !== reason ? advice : ''].filter(Boolean).join('. '), code));
+    // Which kind of doctor / building to go to
+    var specLabel = t('sp_' + rec.specialty, null, code);
+    var facLabel = rec.facility ? t('fac_' + rec.facility, null, code) : '';
+    card.appendChild(listenButton([L[level][1], showReply ? reply : '', reason, advice !== reason ? advice : '',
+      t('recommend', null, code) + ': ' + specLabel, facLabel].filter(Boolean).join('. '), code));
 
-    if (level !== 'GREEN') {
-      card.appendChild(h('a', { class: 'call', href: 'tel:108' }, [icon('phone'), h('span', { text: L.call108 })]));
-      card.appendChild(h('div', { class: 'row-actions' }, [
-        h('button', { class: 'btn', type: 'button', onclick: function () { openNearby('all'); } }, [icon('pin'), L.findHospital])
-      ]));
-      card.appendChild(alertBox(rec, m, code));
-    }
+    if (level !== 'GREEN') card.appendChild(h('a', { class: 'call', href: 'tel:108' }, [icon('phone'), h('span', { text: L.call108 })]));
+    card.appendChild(h('div', { class: 'recommend' }, [
+      h('div', { class: 'label', text: t('recommend', null, code) }),
+      h('div', { class: 'rec-spec' }, [icon('cross'), h('span', { text: specLabel })]),
+      facLabel ? h('div', { class: 'rec-fac', text: t('goTo', null, code) + ': ' + facLabel }) : null,
+      h('button', { class: 'btn primary block', type: 'button', onclick: function () { openNearby('all', rec.specialty); } },
+        [icon('pin'), rec.specialty === 'general' ? L.findHospital : t('findSpec', { spec: specLabel }, code)])
+    ]));
+    if (level !== 'GREEN') card.appendChild(alertBox(rec, m, code));
     if (m) card.appendChild(h('div', { class: 'saved', text: t('savedTo', { name: m.name }, code) }));
     chat.appendChild(card);
     chat.appendChild(h('button', { class: 'btn block', type: 'button', style: 'margin:4px 0 12px', onclick: resetChat }, [t('newCheck', null, code)]));
@@ -448,49 +600,16 @@
       navigator.permissions.query({ name: 'geolocation' }).then(function (p) {
         if (p.state !== 'granted') return;
         navigator.geolocation.getCurrentPosition(function (pos) {
-          store.lastLoc = { lat: pos.coords.latitude, lon: pos.coords.longitude, at: Date.now() };
+          store.lastLoc = { lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy, at: Date.now() };
           save();
           fill();
-        }, function () {}, { timeout: 10000, maximumAge: 600000 });
+        }, function () {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 120000 });
       }).catch(function () {});
     }
     return box;
   }
 
   form.addEventListener('submit', function (e) { e.preventDefault(); send(input.value); });
-
-  /* ---------- Voice input (Web Speech API) ---------- */
-  var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  var rec = null;
-  if (Recognition) {
-    micBtn.hidden = false;
-    micBtn.addEventListener('click', function () {
-      if (rec) { rec.stop(); return; } // second tap stops listening
-      if (busy) return;
-      stopSpeaking();
-      try { rec = new Recognition(); } catch (e) { micBtn.hidden = true; return; }
-      rec.lang = SPEECH_LANG[lang()] || 'en-IN';
-      rec.interimResults = false;
-      rec.maxAlternatives = 1;
-      rec.onstart = function () { micBtn.classList.add('on'); note.textContent = t('listening'); };
-      rec.onresult = function (ev) {
-        var said = ev.results[0][0].transcript;
-        input.value = said;
-        note.textContent = '';
-        send(said);
-      };
-      rec.onerror = function (ev) {
-        if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') note.textContent = t('micDenied');
-        else if (ev.error !== 'aborted') note.textContent = t('micNoSpeech');
-      };
-      rec.onend = function () {
-        micBtn.classList.remove('on');
-        if (note.textContent === t('listening')) note.textContent = '';
-        rec = null;
-      };
-      try { rec.start(); } catch (e) { rec = null; }
-    });
-  }
 
   /* ---------- "Listen" button (speechSynthesis) ---------- */
   var synth = window.speechSynthesis || null;
@@ -524,12 +643,33 @@
   /* =====================================================================
      NEARBY HEALTH FACILITIES
      ===================================================================== */
-  var near = { status: 'idle', choices: [], filter: 'all', query: '' };
+  // where: the location being searched {lat, lon, acc, name} (shown in the banner while loading)
+  // spec: recommended speciality from the last check ('' = none); matching places are listed first
+  var near = { status: 'idle', choices: [], filter: 'all', query: '', where: null, spec: '' };
 
-  function openNearby(filter) {
+  function openNearby(filter, spec) {
     near.filter = filter || 'all';
+    near.spec = spec && spec !== 'general' ? spec : '';
     go('near');
-    if (!store.places && near.status !== 'locating' && near.status !== 'loading') locate();
+    var P = store.places, loading = near.status === 'locating' || near.status === 'loading';
+    if (loading) return;
+    if (!P) locate();
+    // lists saved before speciality tagging existed: fetch again for the same spot
+    else if (near.spec && P.list && P.list.length && !P.list.some(function (p) { return Array.isArray(p.specialties); })) {
+      loadPlaces(P.lat, P.lon, P.label, P.acc);
+    }
+  }
+
+  var BIG = { govt_hospital: 1, hospital: 1, charity_hospital: 1, chc: 1 };
+  function offers(p, spec) {
+    if (!spec) return false;
+    if (spec === 'emergency') return !!p.emergency || (p.specialties || []).indexOf('emergency') >= 0;
+    return (p.specialties || []).indexOf(spec) >= 0;
+  }
+  // 0 = offers the speciality, 1 = big / government hospital (can refer onwards), 2 = everything else
+  function rankFor(p, spec) {
+    if (!spec) return 0;
+    return offers(p, spec) ? 0 : BIG[p.sub] ? 1 : 2;
   }
 
   function setNear(status, extra) {
@@ -541,13 +681,15 @@
   function locate() {
     if (!navigator.geolocation) { setNear('error', { msg: 'locErr' }); return; }
     setNear('locating', { choices: [] });
+    // High accuracy asks the phone for GPS instead of a rough network guess.
     navigator.geolocation.getCurrentPosition(function (pos) {
-      store.lastLoc = { lat: pos.coords.latitude, lon: pos.coords.longitude, at: Date.now() };
+      var c = pos.coords;
+      store.lastLoc = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, at: Date.now() };
       save();
-      loadPlaces(pos.coords.latitude, pos.coords.longitude, '');
+      loadPlaces(c.latitude, c.longitude, '', c.accuracy);
     }, function () {
       setNear('error', { msg: 'locErr' });
-    }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 });
+    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
   }
 
   async function searchPlace(q) {
@@ -559,19 +701,31 @@
       var r = await fetchJSON('/geocode?q=' + encodeURIComponent(q) + '&lang=' + lang(), null, 20000);
       var res = (r.data && r.data.results) || [];
       if (!res.length) setNear('error', { msg: 'locErr' });
-      else if (res.length === 1) loadPlaces(res[0].lat, res[0].lon, res[0].name);
+      else if (res.length === 1) loadPlaces(res[0].lat, res[0].lon, res[0].name, null);
       else setNear('choose', { choices: res });
     } catch (e) {
       setNear('error', { msg: 'nearErr' });
     }
   }
 
-  async function loadPlaces(lat, lon, label) {
+  async function loadPlaces(lat, lon, label, acc) {
+    near.where = { lat: lat, lon: lon, acc: acc, name: label || '' };
     setNear('loading', { choices: [] });
+    // For GPS, look up the place name in parallel so the person can see whether the location is right.
+    if (!label) {
+      fetchJSON('/reverse?lat=' + lat.toFixed(5) + '&lon=' + lon.toFixed(5) + '&lang=' + lang(), null, 15000).then(function (r) {
+        var name = r.data && r.data.name;
+        if (!name) return;
+        if (near.where && near.where.lat === lat) near.where.name = name;
+        if (store.places && store.places.lat === lat) { store.places.label = name; save(); }
+        if (currentTab() === 'near') renderNear();
+      }).catch(function () {});
+    }
     try {
       var r = await fetchJSON('/places?lat=' + lat.toFixed(5) + '&lon=' + lon.toFixed(5), null, PLACES_TIMEOUT_MS);
       if (!r.ok || !r.data || !Array.isArray(r.data.places)) throw new Error('bad response');
-      store.places = { at: Date.now(), lat: lat, lon: lon, label: label || '', list: r.data.places, radius_km: r.data.radius_km };
+      store.places = { at: Date.now(), lat: lat, lon: lon, acc: acc, label: (near.where && near.where.name) || label || '',
+        list: r.data.places, radius_km: r.data.radius_km };
       save();
       setNear('done');
     } catch (e) {
@@ -579,7 +733,30 @@
     }
   }
 
+  function distanceKm(lat1, lon1, lat2, lon2) {
+    var R = 6371, rad = Math.PI / 180;
+    var dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
   function firstPhone(p) { return (p || '').split(/[;,/]/)[0].replace(/[^\d+]/g, ''); }
+  function shortPlace(name) { return (name || '').split(',').slice(0, 2).join(',').trim(); }
+  // Start the route from the same point the list was built from, so the map matches the distances shown.
+  function directionsUrl(p, from) {
+    return 'https://www.google.com/maps/dir/?api=1&origin=' + from.lat.toFixed(6) + ',' + from.lon.toFixed(6) +
+      '&destination=' + (+p.lat).toFixed(6) + ',' + (+p.lon).toFixed(6) + '&travelmode=driving';
+  }
+
+  function locationBanner(where) {
+    var acc = where.acc;
+    var box = h('div', null, [h('div', { class: 'locbar' }, [icon('pin'), h('div', { class: 'locbar-txt' }, [
+      h('div', { class: 'loc-main', text: t('locHere', { place: shortPlace(where.name) || t('myLocation') }) }),
+      acc ? h('div', { class: 'loc-acc', text: t('locAcc', { n: fmtKm(acc / 1000) }) }) : null,
+      h('button', { class: 'linkbtn', type: 'button', text: t('locWrong'), onclick: function () { var q = $('placeq'); if (q) q.focus(); } })
+    ])])]);
+    if (acc && acc > APPROX_M) box.appendChild(h('p', { class: 'status warn', text: t('locApprox') }));
+    return box;
+  }
 
   function renderNear() {
     var v = $('view-near');
@@ -590,27 +767,33 @@
     v.appendChild(h('button', { class: 'btn primary big', type: 'button', disabled: busyNow, onclick: locate }, [icon('target'), t('useLoc')]));
     var q = h('input', { type: 'text', id: 'placeq', placeholder: t('orType'), 'aria-label': t('orType'), enterkeyhint: 'search' });
     q.value = near.query;
+    var statusLine = h('p', { class: 'status', role: 'status' });
     v.appendChild(h('form', { class: 'searchrow', onsubmit: function (e) { e.preventDefault(); searchPlace(q.value); } },
-      [q, h('button', { class: 'btn', type: 'submit', disabled: busyNow, text: t('search') })]));
+      [q, voiceButton(q, searchPlace, statusLine), h('button', { class: 'btn', type: 'submit', disabled: busyNow, text: t('search') })]));
 
     // Status line
     var msg = near.status === 'locating' ? t('locating') : near.status === 'loading' ? t('loading')
       : near.status === 'error' ? t(near.msg) : '';
-    if (msg) v.appendChild(h('p', { class: 'status' + (near.status === 'error' ? ' err' : ''), role: 'status', text: msg }));
+    statusLine.textContent = msg;
+    statusLine.className = 'status' + (near.status === 'error' ? ' err' : busyNow ? ' loading' : '');
+    v.appendChild(statusLine);
 
     // Choose between several matching places
     if (near.status === 'choose') {
       v.appendChild(h('p', { class: 'status', text: t('pickPlace') }));
       v.appendChild(h('div', { class: 'choices' }, near.choices.map(function (c) {
-        return h('button', { class: 'btn', type: 'button', text: c.name, onclick: function () { loadPlaces(c.lat, c.lon, c.name); } });
+        return h('button', { class: 'btn', type: 'button', text: c.name, onclick: function () { loadPlaces(c.lat, c.lon, c.name, null); } });
       })));
     }
 
     var P = store.places;
+    // Where are we searching from? (the new location while loading, otherwise the saved list's location)
+    var where = busyNow && near.where ? near.where : P ? { lat: P.lat, lon: P.lon, acc: P.acc, name: P.label } : null;
+    if (where) v.appendChild(locationBanner(where));
+
     if (P && P.list) {
-      var head = P.label ? t('nearFor', { place: P.label.split(',').slice(0, 2).join(',') }) : t('myLocation');
       var stale = Date.now() - P.at > 6 * 3600000;
-      v.appendChild(h('p', { class: 'muted small', text: head + (stale || near.status === 'error' ? ' · ' + t('savedList', { date: fmtDate(P.at, true) }) : '') }));
+      if (stale || near.status === 'error') v.appendChild(h('p', { class: 'muted small', text: t('savedList', { date: dateTime(P.at) }) }));
 
       v.appendChild(h('div', { class: 'filters', role: 'group' }, FILTERS.map(function (f) {
         var n = f[0] === 'all' ? P.list.length : P.list.filter(function (p) { return p.kind === f[0]; }).length;
@@ -618,21 +801,38 @@
           onclick: function () { near.filter = f[0]; renderNear(); } }, [t(f[1]) + ' (' + n + ')']);
       })));
 
-      var list = P.list.filter(function (p) { return near.filter === 'all' || p.kind === near.filter; });
+      // Recommended speciality from the symptom check
+      var spec = near.spec, specLabel = spec ? t('sp_' + spec) : '';
+      if (spec) {
+        v.appendChild(h('div', { class: 'specbar' }, [h('span', { text: '★ ' + t('specShowing', { spec: specLabel }) }),
+          h('button', { class: 'linkbtn', type: 'button', text: t('specAll'), onclick: function () { near.spec = ''; renderNear(); } })]));
+        if (!P.list.some(function (p) { return offers(p, spec); })) v.appendChild(h('p', { class: 'status warn', text: t('specNone', { spec: specLabel }) }));
+      }
+
+      // Distances from the exact searched point (the server caches by ~1 km cell)
+      var list = P.list.filter(function (p) { return near.filter === 'all' || p.kind === near.filter; })
+        .map(function (p) { return { p: p, km: distanceKm(P.lat, P.lon, +p.lat, +p.lon), rank: rankFor(p, spec) }; })
+        .sort(function (a, b) { return a.rank - b.rank || a.km - b.km; });
       if (!list.length && near.filter !== 'ngo') v.appendChild(h('p', { class: 'muted', text: t('none') }));
-      list.forEach(function (p) {
-        var phone = firstPhone(p.phone);
-        v.appendChild(h('div', { class: 'card place ' + p.kind }, [
-          h('div', { class: 'head' }, [
-            h('div', null, [h('div', { class: 'pname', text: p.name }), p.local_name ? h('div', { class: 'local', text: p.local_name, lang: 'kn' }) : null]),
-            h('span', { class: 'dist', text: t('km', { n: p.distance_km }) })
-          ]),
-          h('div', { class: 'kind' }, [t('s_' + p.sub), p.emergency ? ' ' : null, p.emergency ? h('span', { class: 'badge em', text: t('emergency24') }) : null]),
-          p.address ? h('div', { class: 'addr', text: p.address }) : null,
-          h('div', { class: 'row-actions' }, [
-            phone ? h('a', { class: 'btn', href: 'tel:' + phone }, [icon('phone'), t('callPlace')]) : null,
-            h('a', { class: 'btn primary', target: '_blank', rel: 'noopener',
-              href: 'https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lon }, [icon('route'), t('directions')])
+      list.forEach(function (x) {
+        var p = x.p, phone = firstPhone(p.phone), match = offers(p, spec);
+        var extra = (p.specialties || []).filter(function (s) { return s !== 'emergency' && s !== spec; });
+        v.appendChild(h('div', { class: 'card place ' + p.kind + (match ? ' match' : '') }, [
+          h('span', { class: 'k-ico', style: 'background:' + (KIND_COLORS[p.kind] || '#0a7d4f') }, [icon('cross')]),
+          h('div', { class: 'body' }, [
+            h('div', { class: 'head' }, [
+              h('div', null, [h('div', { class: 'pname', text: p.name }), p.local_name ? h('div', { class: 'local', text: p.local_name }) : null]),
+              h('span', { class: 'dist', text: t('km', { n: fmtKm(x.km) }) })
+            ]),
+            h('div', { class: 'kind', style: 'color:' + (KIND_COLORS[p.kind] || '#0a7d4f') },
+              [t('s_' + p.sub), p.emergency ? ' ' : null, p.emergency ? h('span', { class: 'badge em', text: t('emergency24') }) : null]),
+            match && spec !== 'emergency' ? h('div', null, [h('span', { class: 'badge spec', text: '★ ' + specLabel })]) : null,
+            extra.length ? h('div', { class: 'spchips' }, extra.map(function (s) { return h('span', { class: 'chip', text: t('sp_' + s) }); })) : null,
+            p.address ? h('div', { class: 'addr', text: p.address }) : null,
+            h('div', { class: 'row-actions' }, [
+              phone ? h('a', { class: 'btn', href: 'tel:' + phone }, [icon('phone'), t('callPlace')]) : null,
+              h('a', { class: 'btn primary', target: '_blank', rel: 'noopener', href: directionsUrl(p, P) }, [icon('route'), t('directions')])
+            ])
           ])
         ]));
       });
@@ -672,7 +872,7 @@
       fam.flash = 'contact';
       renderFamily();
     } }, [
-      h('b', { text: t('pfContact') }),
+      h('div', { class: 'sec', style: 'margin-top:0' }, [icon('phone'), t('pfContact')]),
       h('p', { class: 'muted small', text: t('pfContactHint') }),
       h('div', { class: 'two' }, [
         h('div', { class: 'field' }, [h('label', { for: 'cname', text: t('pfContactName') }), cName]),
@@ -684,15 +884,14 @@
     fam.flash = '';
 
     // Members
-    v.appendChild(h('h3', { text: t('pfMembers') }));
+    v.appendChild(sectionTitle('people', t('pfMembers')));
     store.members.forEach(function (m) {
       var confirming = fam.confirm === m.id;
       v.appendChild(h('div', { class: 'card' }, [
-        h('div', { class: 'mrow' }, [
-          h('span', { class: 'avatar', text: (m.name || '?').trim().charAt(0).toUpperCase() }),
+        h('div', { class: 'mrow' }, [avatar(m),
           h('div', { class: 'txt' }, [h('div', { class: 'name', text: m.name }), h('div', { class: 'muted small', text: memberMeta(m) })])
         ]),
-        h('div', null, (m.conditions || []).map(function (c) { return h('span', { class: 'chip', text: t('c_' + c) }); })),
+        h('div', { style: 'margin-top:6px' }, (m.conditions || []).map(function (c) { return h('span', { class: 'chip', text: t('c_' + c) }); })),
         h('div', { class: 'row-actions' }, [
           h('button', { class: 'btn primary', type: 'button', onclick: function () { startCheckFor(m.id); } }, [icon('chat'), t('navCheck')]),
           h('button', { class: 'btn', type: 'button', onclick: function () { editMember(m.id); } }, [icon('edit'), t('edit')]),
@@ -777,7 +976,7 @@
      START
      ===================================================================== */
   document.querySelectorAll('[data-icon]').forEach(function (s) { s.appendChild(icon(s.getAttribute('data-icon'))); });
-  langSel.value = T[store.lang] ? store.lang : DEFAULT_LANG;
+  langSel.value = initialLang();
   langSel.addEventListener('change', function () {
     stopSpeaking();
     applyLanguage();
