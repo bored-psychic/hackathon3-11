@@ -10,6 +10,8 @@ app = Flask(__name__)
 MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 LANG_NAMES = {"en": "English", "kn": "Kannada", "hi": "Hindi", "ta": "Tamil", "te": "Telugu", "ml": "Malayalam"}
 LEVELS = ("RED", "AMBER", "GREEN")
+MAX_FOLLOW_UPS = 2
+MAX_MESSAGE_CHARS = 1000
 
 RED_MSG = {
     "en": "This may be an emergency. Call 108 now or go to the nearest hospital immediately.",
@@ -26,6 +28,15 @@ ERR_MSG = {
     "ta": "மன்னிக்கவும், ஏதோ தவறு நடந்துவிட்டது. அவசரம் என்றால் 108 ஐ அழைக்கவும்.",
     "te": "క్షమించండి, ఏదో తప్పు జరిగింది. అత్యవసరమైతే 108 కి కాల్ చేయండి.",
     "ml": "ക്ഷമിക്കണം, എന്തോ പിശക് സംഭവിച്ചു. അടിയന്തരമാണെങ്കിൽ 108 ൽ വിളിക്കുക.",
+}
+
+FALLBACK_MSG = {
+    "en": "I could not decide safely. Please visit your nearest PHC within 24 hours. If it gets worse, call 108.",
+    "kn": "ಸುರಕ್ಷಿತವಾಗಿ ನಿರ್ಧರಿಸಲು ನನಗೆ ಆಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು 24 ಗಂಟೆಗಳ ಒಳಗೆ ಹತ್ತಿರದ ಪ್ರಾಥಮಿಕ ಆರೋಗ್ಯ ಕೇಂದ್ರಕ್ಕೆ (PHC) ಹೋಗಿ. ಹೆಚ್ಚಾದರೆ 108 ಗೆ ಕರೆ ಮಾಡಿ.",  # needs native-speaker review
+    "hi": "सुरक्षित रूप से तय नहीं हो पाया। कृपया 24 घंटे के भीतर नज़दीकी प्राथमिक स्वास्थ्य केंद्र (PHC) जाएँ। हालत बिगड़े तो 108 पर कॉल करें।",  # needs native-speaker review
+    "ta": "என்னால் பாதுகாப்பாக முடிவு செய்ய முடியவில்லை. தயவுசெய்து 24 மணி நேரத்திற்குள் அருகிலுள்ள ஆரம்ப சுகாதார நிலையத்திற்கு (PHC) செல்லவும். நிலை மோசமானால் 108 ஐ அழைக்கவும்.",  # needs native-speaker review
+    "te": "నేను సురక్షితంగా నిర్ణయించలేకపోయాను. దయచేసి 24 గంటల్లోపు సమీప ప్రాథమిక ఆరోగ్య కేంద్రానికి (PHC) వెళ్లండి. పరిస్థితి తీవ్రమైతే 108 కి కాల్ చేయండి.",  # needs native-speaker review
+    "ml": "എനിക്ക് സുരക്ഷിതമായി തീരുമാനിക്കാൻ കഴിഞ്ഞില്ല. ദയവായി 24 മണിക്കൂറിനുള്ളിൽ അടുത്തുള്ള പ്രാഥമികാരോഗ്യ കേന്ദ്രത്തിൽ (PHC) പോകുക. സ്ഥിതി മോശമായാൽ 108 ൽ വിളിക്കുക.",  # needs native-speaker review
 }
 
 SYSTEM_PROMPT = """You are a symptom triage assistant for people in rural Karnataka, India. You are NOT a doctor.
@@ -55,7 +66,7 @@ def strip_fences(text):
     return text
 
 
-def call_llm(history, message, lang):
+def call_llm(history, message, lang, force_final=False):
     key = os.getenv("GEMINI_API_KEY")
     if not key:
         raise RuntimeError("GEMINI_API_KEY missing")
@@ -64,8 +75,11 @@ def call_llm(history, message, lang):
         role = "user" if h.get("role") == "user" else "model"
         contents.append({"role": role, "parts": [{"text": h.get("text", "")}]})
     contents.append({"role": "user", "parts": [{"text": message}]})
+    system = SYSTEM_PROMPT.format(lang=LANG_NAMES[lang])
+    if force_final:
+        system += "\nYou must now return type final."
     body = {
-        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT.format(lang=LANG_NAMES[lang])}]},
+        "systemInstruction": {"parts": [{"text": system}]},
         "contents": contents,
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
     }
@@ -124,6 +138,12 @@ def red_response(lang, kw):
             "reason": RED_MSG[lang], "advice": RED_MSG[lang], "matched": kw}
 
 
+def fallback_response(lang, symptoms):
+    # reason stays empty so the card, which shows reason and advice, shows the message once
+    return {"type": "final", "level": "AMBER", "reply": FALLBACK_MSG[lang],
+            "reason": "", "advice": FALLBACK_MSG[lang], "symptoms_en": symptoms}
+
+
 @app.get("/")
 def index():
     return render_template("index.html")
@@ -145,9 +165,14 @@ def chat():
     if kw:
         return jsonify(red_response(lang, kw))
 
+    # Checked after the red-flag scan on purpose: a long message about an emergency is still RED
+    if len(message) > MAX_MESSAGE_CHARS:
+        return jsonify({"error": "too_long"}), 400
+
     # Step 4: LLM
+    force_final = sum(1 for h in history if h.get("role") == "bot") >= MAX_FOLLOW_UPS
     try:
-        out = call_llm(history, message, lang)
+        out = call_llm(history, message, lang, force_final)
     except Exception as e:
         # never log str(e): requests errors include the URL, which contains the API key
         status = getattr(getattr(e, "response", None), "status_code", None)
@@ -165,6 +190,10 @@ def chat():
     kw = find_red_flag(raw_symptom_text(out))
     if kw and result.get("level") != "RED":
         return jsonify(red_response(lang, kw))
+
+    # Step 6: follow-up cap. Runs after the override so red-flag symptoms still win
+    if force_final and result["type"] == "question":
+        return jsonify(fallback_response(lang, result["symptoms_en"]))
     return jsonify(result)
 
 
