@@ -78,6 +78,10 @@
   <a href="#check" data-tab="check"><span class="ico" data-icon="chat"></span><span data-i18n="navCheck">Check</span></a>
   <a href="#near" data-tab="near"><span class="ico" data-icon="pin"></span><span data-i18n="navNear">Nearby</span></a>
   <a href="#family" data-tab="family"><span class="ico" data-icon="people"></span><span data-i18n="navFamily">Family</span></a>
+  <div class="side-acct" id="sideAcct" hidden>
+    <span class="side-acct-num" id="sideAcctNum"></span>
+    <button type="button" class="btn side-logout" id="sideLogout">Log out</button>
+  </div>
 </nav>
 
 <script defer src="{{ url_for('static', filename='i18n.js') }}?v=10"></script>

@@ -208,12 +208,25 @@
   function readSession() {
     try { var x = JSON.parse(localStorage.getItem(SESSION_KEY)); return x && /^\d{10}$/.test(x.phone) ? x.phone : null; } catch (e) { return null; }
   }
+  function maskedPhone() { return '+91 •••• ' + phone.slice(-4); }
+  function askSignOut() {
+    if (phone && confirm(t('switchConfirm', { num: '•••• ' + phone.slice(-4) }))) signOut();
+  }
+  // Who is signed in, and how to log out: the top-bar chip, the bar on Home and the desktop sidebar.
   function updateAcct() {
-    var b = $('acct');
+    var b = $('acct'), side = $('sideAcct');
     b.hidden = !phone;
+    if (side) side.hidden = !phone;
     if (!phone) return;
-    b.textContent = '•••• ' + phone.slice(-4);
-    b.setAttribute('aria-label', t('switchNumber') + ': •••• ' + phone.slice(-4));
+    b.textContent = '';
+    b.appendChild(icon('people'));
+    b.appendChild(h('span', { text: '•••• ' + phone.slice(-4) }));
+    b.setAttribute('aria-label', t('signedInAs', { num: maskedPhone() }) + '. ' + t('logout'));
+    b.title = t('signedInAs', { num: maskedPhone() });
+    if (side) {
+      $('sideAcctNum').textContent = t('signedInAs', { num: maskedPhone() });
+      $('sideLogout').textContent = t('logout');
+    }
   }
   // Forget everything in memory that belongs to the previous number (chat, nearby search, forms).
   function resetSessionState() {
@@ -392,6 +405,11 @@
   function renderHome() {
     var v = $('view-home');
     v.textContent = '';
+
+    // Who is signed in, with a visible way out (on desktop the sidebar shows the same)
+    if (phone) v.appendChild(h('div', { class: 'acctbar' }, [icon('people'),
+      h('span', { text: t('signedInAs', { num: maskedPhone() }) }),
+      h('button', { class: 'linkbtn', type: 'button', text: t('logout'), onclick: askSignOut })]));
 
     // Hero banner with the main action
     v.appendChild(h('section', { class: 'hero' }, [
@@ -1172,9 +1190,8 @@
   document.querySelectorAll('[data-icon]').forEach(function (s) { s.appendChild(icon(s.getAttribute('data-icon'))); });
   phone = readSession();
   store = loadStore();
-  $('acct').addEventListener('click', function () {
-    if (phone && confirm(t('switchConfirm', { num: '•••• ' + phone.slice(-4) }))) signOut();
-  });
+  $('acct').addEventListener('click', askSignOut);
+  $('sideLogout').addEventListener('click', askSignOut);
   langSel.value = initialLang();
   langSel.addEventListener('change', function () {
     stopSpeaking();

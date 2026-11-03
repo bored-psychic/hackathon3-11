@@ -16,6 +16,7 @@ window.I18N = {
     badPhone: 'Enter a 10-digit mobile number.',
     badCode: 'That code is not right. In demo mode it is 123456.',
     switchNumber: 'Switch number',
+    signedInAs: 'Signed in as {num}', logout: 'Log out',
     switchConfirm: 'Sign out of +91 {num}? Its data stays saved on this phone.',
     appName: 'Health Check', lang: 'Language', call108: 'Call 108',
     disclaimer: 'Not medical advice. In an emergency call 108.',
@@ -100,6 +101,7 @@ window.I18N = {
     badPhone: '10 ಅಂಕಿಯ ಮೊಬೈಲ್ ಸಂಖ್ಯೆಯನ್ನು ನಮೂದಿಸಿ.',
     badCode: 'ಕೋಡ್ ಸರಿಯಿಲ್ಲ. ಡೆಮೊ ಮೋಡ್‌ನಲ್ಲಿ ಅದು 123456.',
     switchNumber: 'ಬೇರೆ ಸಂಖ್ಯೆಗೆ ಬದಲಿಸಿ',
+    signedInAs: 'ಲಾಗಿನ್ ಆಗಿರುವ ಸಂಖ್ಯೆ: {num}', logout: 'ಲಾಗ್ ಔಟ್',  // needs native-speaker review
     switchConfirm: '+91 {num} ನಿಂದ ಸೈನ್ ಔಟ್ ಆಗಬೇಕೇ? ಅದರ ಮಾಹಿತಿ ಈ ಫೋನ್‌ನಲ್ಲಿ ಉಳಿಯುತ್ತದೆ.',
     appName: 'ಆರೋಗ್ಯ ಪರಿಶೀಲನೆ', lang: 'ಭಾಷೆ', call108: '108 ಗೆ ಕರೆ ಮಾಡಿ',
     disclaimer: 'ಇದು ವೈದ್ಯಕೀಯ ಸಲಹೆ ಅಲ್ಲ. ತುರ್ತು ಸಂದರ್ಭದಲ್ಲಿ 108 ಗೆ ಕರೆ ಮಾಡಿ.',
@@ -180,6 +182,7 @@ window.I18N = {
     badPhone: '10 अंकों का मोबाइल नंबर दर्ज करें।',
     badCode: 'कोड सही नहीं है। डेमो मोड में यह 123456 है।',
     switchNumber: 'दूसरे नंबर पर जाएँ',
+    signedInAs: '{num} से साइन इन है', logout: 'लॉग आउट',  // needs native-speaker review
     switchConfirm: '+91 {num} से साइन आउट करें? इसका डेटा इसी फ़ोन पर सुरक्षित रहेगा।',
     appName: 'स्वास्थ्य जाँच', lang: 'भाषा', call108: '108 पर कॉल करें',
     disclaimer: 'यह डॉक्टरी सलाह नहीं है। आपातकाल में 108 पर कॉल करें।',
@@ -260,6 +263,7 @@ window.I18N = {
     badPhone: '10 இலக்க மொபைல் எண்ணை உள்ளிடவும்.',
     badCode: 'குறியீடு சரியல்ல. டெமோ முறையில் அது 123456.',
     switchNumber: 'வேறு எண்ணுக்கு மாறு',
+    signedInAs: '{num} மூலம் உள்நுழைந்துள்ளீர்கள்', logout: 'வெளியேறு',  // needs native-speaker review
     switchConfirm: '+91 {num} இலிருந்து வெளியேறவா? அதன் தரவு இந்த தொலைபேசியில் சேமிக்கப்பட்டிருக்கும்.',
     appName: 'உடல்நலப் பரிசோதனை', lang: 'மொழி', call108: '108 ஐ அழைக்கவும்',
     disclaimer: 'இது மருத்துவ ஆலோசனை அல்ல. அவசரநிலையில் 108 ஐ அழைக்கவும்.',
@@ -340,6 +344,7 @@ window.I18N = {
     badPhone: '10 అంకెల మొబైల్ నంబర్ నమోదు చేయండి.',
     badCode: 'కోడ్ సరైనది కాదు. డెమో మోడ్‌లో అది 123456.',
     switchNumber: 'వేరే నంబర్‌కు మారండి',
+    signedInAs: '{num} తో సైన్ ఇన్ అయ్యారు', logout: 'లాగ్ అవుట్',  // needs native-speaker review
     switchConfirm: '+91 {num} నుండి సైన్ అవుట్ అవ్వాలా? దాని డేటా ఈ ఫోన్‌లో భద్రంగా ఉంటుంది.',
     appName: 'ఆరోగ్య పరీక్ష', lang: 'భాష', call108: '108 కి కాల్ చేయండి',
     disclaimer: 'ఇది వైద్య సలహా కాదు. అత్యవసర పరిస్థితిలో 108 కి కాల్ చేయండి.',
@@ -420,6 +425,7 @@ window.I18N = {
     badPhone: '10 അക്ക മൊബൈൽ നമ്പർ നൽകുക.',
     badCode: 'കോഡ് ശരിയല്ല. ഡെമോ മോഡിൽ അത് 123456 ആണ്.',
     switchNumber: 'മറ്റൊരു നമ്പറിലേക്ക് മാറുക',
+    signedInAs: '{num} ഉപയോഗിച്ച് സൈൻ ഇൻ ചെയ്തു', logout: 'ലോഗ് ഔട്ട്',  // needs native-speaker review
     switchConfirm: '+91 {num} ൽ നിന്ന് സൈൻ ഔട്ട് ചെയ്യണോ? അതിന്റെ ഡാറ്റ ഈ ഫോണിൽ സൂക്ഷിക്കും.',
     appName: 'ആരോഗ്യ പരിശോധന', lang: 'ഭാഷ', call108: '108 ൽ വിളിക്കുക',
     disclaimer: 'ഇത് വൈദ്യോപദേശമല്ല. അടിയന്തര സാഹചര്യത്തിൽ 108 ൽ വിളിക്കുക.',

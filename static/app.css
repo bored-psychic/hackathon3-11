@@ -143,7 +143,7 @@ h2 { font-size: 21px; margin: 4px 0 14px; line-height: 1.3; }
 .row-actions .btn { flex: 1 1 auto; }
 button:disabled { opacity: .5; cursor: default; }
 .linkbtn {
-  border: 0; background: none; padding: 6px 0; min-height: 36px;
+  border: 0; background: none; padding: 6px 0; min-height: 44px;
   color: var(--brand-dark); font-weight: 700; text-decoration: underline; cursor: pointer; text-align: left;
 }
 .badge {
@@ -257,7 +257,7 @@ html[lang="en"] .hero h2 { letter-spacing: -.02em; line-height: 1.1; }
 .bubble.err { background: #fff5e6; border: 1px solid #f0c27b; }
 .listen {
   display: flex; align-items: center; gap: 4px;
-  min-height: 40px; margin-top: 2px; padding: 0 10px 0 6px;
+  min-height: 44px; margin-top: 2px; padding: 0 10px 0 6px;
   border: 0; border-radius: 10px; background: transparent;
   color: var(--brand-dark); font-size: 14px; font-weight: 700; cursor: pointer;
 }
@@ -388,7 +388,7 @@ input.live { border-color: var(--red) !important; background: #fff8f8; box-shado
 .filters { display: flex; gap: 6px; overflow-x: auto; padding: 4px 14px 10px; margin: 0 -14px; scrollbar-width: none; }
 .filters::-webkit-scrollbar { display: none; }
 .filters button {
-  flex-shrink: 0; min-height: 40px; padding: 0 14px;
+  flex-shrink: 0; min-height: 44px; padding: 0 14px;
   border: 1px solid var(--line); border-radius: 999px; background: #fff;
   font-weight: 700; cursor: pointer;
 }
@@ -485,6 +485,26 @@ input.live { border-color: var(--red) !important; background: #fff8f8; box-shado
   font-weight: 600; font-size: 14px; cursor: pointer;
 }
 body.signed-out .tabbar { display: none; }
+.acct { display: inline-flex; align-items: center; gap: 6px; }
+.acct svg { width: 18px; height: 18px; color: var(--brand); flex-shrink: 0; }
+.acctbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 12px; padding: 4px 6px 4px 14px; background: #fff;
+  border: 1px solid var(--line); border-radius: 14px; font-size: 14px;
+}
+.acctbar svg { width: 18px; height: 18px; color: var(--brand); flex-shrink: 0; }
+.acctbar span { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.acctbar .linkbtn { padding: 0 10px; }
+.side-acct { display: none; }
+@media (min-width: 1024px) {
+  .acctbar { display: none; }  /* the sidebar shows who is signed in */
+  .side-acct:not([hidden]) {
+    display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding: 12px;
+    border: 1px solid var(--line); border-radius: 14px; background: var(--bg); font-size: 13px;
+  }
+  .side-acct-num { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+  .side-logout { width: 100%; background: #fff; border: 1px solid #C9D6D2; color: var(--ink); }
+}
 .loginbox { max-width: 440px; margin: 24px auto; padding: 20px 16px; }
 .phonerow { display: flex; gap: 8px; }
 .phonerow .prefix {
